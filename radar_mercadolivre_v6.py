@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Radar de Ofertas Mercado Livre -> Telegram (API oficial / items bulk)
+Radar de Ofertas Mercado Livre — somente monitoramento (API oficial / items bulk)
 
 Esta versão NÃO usa /products/search para descobrir anúncios por palavra-chave.
 Ela monitora:
@@ -17,8 +17,6 @@ Comandos:
     python radar_mercadolivre_v6.py --item MLB1234567890
 
 Variáveis obrigatórias no .env:
-    TELEGRAM_TOKEN=
-    TELEGRAM_CANAL=
     ML_CLIENT_ID=
     ML_CLIENT_SECRET=
     ML_ACCESS_TOKEN=
@@ -50,7 +48,8 @@ Arquivos opcionais:
 
 Observação:
     O Mercado Livre orienta gerar links de afiliado pelas ferramentas oficiais.
-    Se não houver link no ml_links_afiliados.json, o bot usa o permalink normal.
+    Fase 0: publicação Telegram desativada, inclusive com link afiliado mapeado.
+    Permalinks comuns são exibidos apenas no terminal para revisão manual.
 """
 
 from __future__ import annotations
@@ -137,8 +136,6 @@ def moeda(valor: float | int | None) -> str:
 
 def validar_configuracao() -> None:
     obrigatorias = {
-        "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
-        "TELEGRAM_CANAL": TELEGRAM_CANAL,
         "ML_CLIENT_ID": ML_CLIENT_ID,
         "ML_CLIENT_SECRET": ML_CLIENT_SECRET,
         "ML_ACCESS_TOKEN": ML_ACCESS_TOKEN,
@@ -259,6 +256,9 @@ def ml_request(
             **kwargs,
         )
 
+    if r.status_code == 403:
+        log("⚠️ ML acesso_negado_403: causa não determinada pela resposta HTTP; "
+            "confira recurso/ID, permissões e autorização. Não renovar token só por 403.")
     return r
 
 
@@ -389,6 +389,8 @@ def obter_item(item_id: str) -> dict[str, Any] | None:
         else registro.get("code")
     )
 
+    if status_individual == 403:
+        log(f"⚠️ {item_id}: acesso_negado_403 no resultado individual; causa não determinada.")
     if status_individual not in (200, 206):
         corpo = registro.get("body") or registro
         log(
@@ -682,66 +684,9 @@ def legenda(oferta: dict[str, Any]) -> str:
 
 
 def enviar_telegram(oferta: dict[str, Any]) -> bool:
-    teclado = json.dumps(
-        {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "🛒 VER OFERTA",
-                        "url": oferta["link"],
-                    }
-                ]
-            ]
-        },
-        ensure_ascii=False,
-    )
-
-    if oferta.get("image"):
-        try:
-            r = SESSION.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-                data={
-                    "chat_id": TELEGRAM_CANAL,
-                    "photo": oferta["image"],
-                    "caption": legenda(oferta),
-                    "parse_mode": "HTML",
-                    "reply_markup": teclado,
-                },
-                timeout=30,
-            )
-        except requests.RequestException as exc:
-            log(f"❌ Telegram: {exc}")
-            return False
-
-        if r.status_code == 200:
-            return True
-
-        log(
-            f"⚠️ Foto falhou HTTP {r.status_code}; "
-            "tentando mensagem sem foto."
-        )
-
-    try:
-        r = SESSION.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            data={
-                "chat_id": TELEGRAM_CANAL,
-                "text": legenda(oferta),
-                "parse_mode": "HTML",
-                "reply_markup": teclado,
-                "disable_web_page_preview": False,
-            },
-            timeout=30,
-        )
-    except requests.RequestException as exc:
-        log(f"❌ Telegram: {exc}")
-        return False
-
-    if r.status_code != 200:
-        log(f"❌ Telegram HTTP {r.status_code}: {r.text[:250]}")
-        return False
-
-    return True
+    """Trava da Fase 0: nenhuma chamada ao Telegram, mesmo em uso direto."""
+    log("🔒 Mercado Livre: publicação desativada; somente monitoramento manual.")
+    return False
 
 
 def coletar_ids() -> set[str]:
@@ -762,8 +707,8 @@ def ciclo(
     dry_run: bool = False,
     item_unico: str | None = None,
 ) -> None:
+    log("🔒 Mercado Livre em modo monitoramento: nada será publicado no Telegram.")
     links_afiliados = carregar_links_afiliados()
-    estado = carregar_estado()
 
     if item_unico:
         ids = {item_unico}
@@ -785,12 +730,6 @@ def ciclo(
 
         if not oferta:
             diagnostico[motivo] = diagnostico.get(motivo, 0) + 1
-            continue
-
-        publicar, motivo_pub = deve_publicar(oferta, estado)
-
-        if not publicar and not dry_run and not ML_MODO_TESTE:
-            diagnostico[motivo_pub] = diagnostico.get(motivo_pub, 0) + 1
             continue
 
         ofertas.append(oferta)
@@ -820,38 +759,23 @@ def ciclo(
 
     escolhidas = ofertas[:ML_MAX_PUBLICACOES_CICLO]
 
-    for i, oferta in enumerate(escolhidas):
-        af = " afiliado" if oferta.get("affiliate") else ""
+    for oferta in escolhidas:
+        af = " (link mapeado)" if oferta.get("affiliate") else ""
         log(
             f"🎯 {oferta['discount']:.0f}% OFF | "
             f"{moeda(oferta['price'])} | "
             f"{oferta['title'][:65]}{af}"
         )
 
-        if dry_run or ML_MODO_TESTE:
-            print(f"   {oferta['link']}")
-            continue
-
-        if enviar_telegram(oferta):
-            estado[oferta["id"]] = {
-                "price": oferta["price"],
-                "discount": oferta["discount"],
-                "published_at": datetime.now(timezone.utc).isoformat(),
-            }
-            salvar_estado(estado)
-            log("✅ Publicada no Telegram.")
-        else:
-            log("❌ Falha ao publicar.")
-
-        if i < len(escolhidas) - 1:
-            time.sleep(INTERVALO_PUBLICACOES)
+        tipo_link = "mapeado pelo operador; comissão não verificada" if oferta.get("affiliate") else "comum; sem afiliação"
+        print(f"   Link {tipo_link}: {oferta['link']}")
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Radar Mercado Livre usando endpoints oficiais."
+        description="Radar Mercado Livre: somente monitoramento, sem publicação."
     )
-    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--dry-run", action="store_true", help="compatibilidade: todos os modos apenas monitoram")
     p.add_argument("--loop", action="store_true")
     p.add_argument("--item", type=str)
     p.add_argument(
@@ -863,8 +787,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    validar_configuracao()
     args = parse_args()
+    validar_configuracao()
 
     if args.probe:
         probe_id = extrair_item_id(args.probe)

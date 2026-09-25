@@ -11,7 +11,7 @@ Amazon e Mercado Livre continuam na captura, mas o publicador os deixa pendentes
 ## Instalação no Windows
 
 1. Pare os dois programas com Ctrl+C. Faça backup dos scripts antigos e extraia TODOS os arquivos deste pacote na mesma pasta Telegram, substituindo os scripts. Não rode versões antigas do publicador em paralelo.
-2. Preserve `.env`, `monitor_ofertas.session`, o banco e as filas locais. O pacote não contém nem substitui esses dados. Apenas `.env.exemplo` é fornecido como referência.
+2. Preserve `.env`, `monitor_ofertas.session`, o banco e as filas locais. O pacote não contém nem substitui esses dados. Apenas `.env.example` é fornecido como referência.
 3. Acrescente ao `.env`:
 
 ```text

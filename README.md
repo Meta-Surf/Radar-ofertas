@@ -40,7 +40,7 @@ py -m venv .venv
 Copy-Item .env.example .env
 ```
 
-Se já possui `.env`, preserve-o e não execute o comando de cópia sobre ele. Preencha as credenciais no arquivo local. O `.env.example` contém apenas nomes e padrões sem segredos. Para compatibilidade com as instruções anteriores, também existe `.env.exemplo`.
+Se já possui `.env`, preserve-o e não execute o comando de cópia sobre ele. Preencha as credenciais no arquivo local. O `.env.example` contém apenas nomes e padrões sem segredos. `.env.example` é o único modelo de configuração.
 
 ## Radar direto Shopee
 
@@ -72,10 +72,10 @@ Para publicar automaticamente, execute sem `--simular`. A simulação consulta a
 
 - `mercadolivre_auth.py`: fluxo OAuth com callback local. Usa Flask; exibe tokens no terminal após autorização. Não compartilhe a saída. É um utilitário de desenvolvimento, não um servidor de produção.
 - `teste_mercadolivre.py`: consulta real à conta configurada. Não faz parte dos testes automatizados e sua saída pode conter dados pessoais.
-- `radar_mercadolivre_v6.py`: monitor de anúncios/IDs configurados. Comece com `--probe ID_DO_ANUNCIO` ou `--dry-run`; mantenha `ML_MODO_TESTE=1` durante os testes.
+- `radar_mercadolivre_v6.py`: monitor de anúncios/IDs configurados. Todos os modos (inclusive `--loop`) apenas monitoram; não publicam no Telegram. Use `--probe ID_DO_ANUNCIO` para diagnosticar acesso.
 - Copie `examples/ml_itens.example.txt` para `ml_itens.txt` e `examples/ml_links_afiliados.example.json` para `ml_links_afiliados.json` para preencher seus dados localmente.
 
-A autenticação OAuth não garante acesso a todos os anúncios nem habilita uma API de geração de links de afiliado. O v6 pode usar um permalink comum quando falta um link no mapa local; portanto, ainda exige revisão antes de publicação comercial. Isso foi documentado, sem alterar o comportamento do código recebido.
+A autenticação OAuth não garante acesso a todos os anúncios nem habilita uma API de geração de links de afiliado. Na Fase 0, o v6 fica restrito ao monitoramento manual. Links comuns ou mapeados são exibidos somente no terminal. Até chamadas diretas a `enviar_telegram` são bloqueadas por código.
 
 ## Testes
 
@@ -83,7 +83,7 @@ A autenticação OAuth não garante acesso a todos os anúncios nem habilita uma
 .\.venv\Scripts\python.exe -m unittest discover -p "test_*.py" -v
 ```
 
-A suíte inclui testes do monitor, da integração de afiliados e do radar direto Shopee. Usam respostas simuladas; não fazem compras nem publicações reais. Essa cobertura se concentra nos componentes de monitoramento/Shopee; não comprova o funcionamento real do radar Mercado Livre.
+A suíte inclui testes do monitor, da integração de afiliados e do radar direto Shopee. Usam respostas simuladas; não fazem compras nem publicações reais. O Mercado Livre também tem testes mockados de autenticação, HTTP 403 e bloqueio de publicação. Isso não comprova acesso real às APIs nem comissão dos links mapeados.
 
 ## O que fica fora do Git
 
@@ -94,3 +94,7 @@ O arquivo `.session` permite acesso à conta Telegram. Não faça upload do paco
 ## Atualizações
 
 Depois de configurar o repositório remoto, mantenha esta estrutura de arquivos e envie apenas alterações revisadas de código e documentação. Não habilite envios de ofertas por workflows do GitHub: os testes automatizados não precisam de tokens reais.
+
+## Acompanhamento por fases
+
+Consulte [o checklist do projeto](docs/plano-fases.md) e [a análise da auditoria](docs/analise-auditoria.md). Marque itens somente após implementação e verificação; valide operação real separadamente.

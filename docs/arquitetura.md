@@ -12,7 +12,7 @@ Falhas na geração do link impedem a publicação. Uma resposta incerta do Tele
 
 ## Componentes experimentais
 
-`mercadolivre_auth.py` auxilia no OAuth local. `radar_mercadolivre_v6.py` consulta anúncios configurados e pode usar links afiliados previamente mapeados. Essa parte é independente do publicador Shopee; não oferece geração automática de links afiliados Mercado Livre. Alguns acessos a itens ainda retornam HTTP 403.
+`mercadolivre_auth.py` auxilia no OAuth local. `radar_mercadolivre_v6.py` consulta anúncios configurados e pode usar links afiliados previamente mapeados. Decisão da Fase 0: opção (b), somente monitoramento manual. Todos os modos exibem ofertas no terminal, sem gravar publicações; `enviar_telegram` também bloqueia chamadas diretas. Um permalink comum pode aparecer na prévia, mas nunca é publicado. Um link mapeado não comprova comissão. Essa parte é independente do publicador Shopee; não oferece geração automática de links afiliados Mercado Livre. Alguns acessos a itens ainda retornam HTTP 403.
 
 Amazon, Instagram e WhatsApp permanecem pendentes.
 

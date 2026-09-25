@@ -8,6 +8,6 @@
 
 Os testes automatizados não devem publicar no Telegram nem depender de credenciais reais. Testes de integração manuais devem ser identificados explicitamente; `teste_mercadolivre.py` consulta a API real.
 
-Mantenha os comandos da raiz compatíveis com o fluxo Windows existente. Atualize `docs/operacao.md` e `.env.example`/`.env.exemplo` quando mudar configurações. Novas funcionalidades devem ser implementadas nos scripts atuais, não no arquivo histórico.
+Mantenha os comandos da raiz compatíveis com o fluxo Windows existente. Atualize `docs/operacao.md` e `.env.example` quando mudar configurações. Novas funcionalidades devem ser implementadas nos scripts atuais, não no arquivo histórico.
 
 Nunca inclua `.env`, sessões do Telegram, tokens, filas, bancos ou respostas autenticadas em commits e relatos de erro. Revise `git diff --cached` antes de enviar alterações.
