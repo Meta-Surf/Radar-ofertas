@@ -1,0 +1,5 @@
+telethon>=1.45,<2
+python-dotenv>=1.2,<2
+requests>=2.32,<3
+tzdata
+Flask>=3,<4

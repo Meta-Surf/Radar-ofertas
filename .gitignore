@@ -1,0 +1,33 @@
+# Credenciais e configurações locais
+.env
+.env.*
+!.env.example
+!.env.exemplo
+*token*.json
+*credentials*.json
+dados salvos.txt
+
+# Sessões, banco, filas e imagens coletadas
+*.session
+*.session-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.jsonl
+radar_ml_estado.json
+ml_itens.txt
+ml_links_afiliados.json
+imagens_ofertas/
+
+# Python e ambiente local
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.log
+
+# Pacotes de backup podem conter credenciais
+*.rar
+*.zip

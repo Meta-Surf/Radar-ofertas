@@ -1,0 +1,239 @@
+"""Funções locais: produtos, cupons e registro persistente por dia."""
+import html
+import re
+import sqlite3
+from datetime import datetime
+from urllib.parse import urlparse, parse_qs
+from zoneinfo import ZoneInfo
+from html.parser import HTMLParser
+from urllib.parse import urljoin
+
+HOSTS = {'shopee.com.br', 'www.shopee.com.br', 's.shopee.com.br', 'shope.ee',
+         'amazon.com.br', 'www.amazon.com.br', 'amzn.to',
+         'mercadolivre.com.br', 'www.mercadolivre.com.br', 'produto.mercadolivre.com.br',
+         'mercadolivre.com', 'www.mercadolivre.com', 'meli.la'}
+
+# Correspondências informadas pelo usuário. Não são links de afiliado.
+# Só o endereço exato (ignorando fragmento e barra final) recebe este destino.
+KNOWN_DESTINATIONS = {
+    'https://meli.la/2PnnX9t': (
+        'https://www.mercadolivre.com.br/'
+        'placa-de-video-msi-nvidia-rtx-5060-shadow-2x-oc-8gb-gddr7/'
+        'up/MLBU3669698149?pdp_filters=item_id%3AMLB4360643061'
+    ),
+}
+
+def safe_url(url):
+    p = urlparse(url)
+    return p.scheme == 'https' and p.hostname in HOSTS and not p.username and p.port in (None, 443)
+
+def product(url):
+    if not safe_url(url):
+        return None
+    p = urlparse(url)
+    if p.hostname.endswith('shopee.com.br'):
+        m = re.search(r'(?:/product/|/i\.)(\d+)[/.](\d+)', p.path)
+        if not m:
+            m = re.fullmatch(r'/opaanlp/(\d+)/(\d+)/?', p.path)
+        if not m:
+            m = re.search(r'-i\.(\d+)\.(\d+)', p.path)
+        if m:
+            shop, item = m.groups()
+            return ('Shopee:' + shop + ':' + item, 'Shopee', f'https://shopee.com.br/product/{shop}/{item}')
+    if p.hostname.endswith('amazon.com.br'):
+        m = re.search(r'/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?:/|$)', p.path, re.I)
+        if m:
+            asin = m[1].upper()
+            return ('Amazon:' + asin, 'Amazon', 'https://www.amazon.com.br/dp/' + asin)
+    if 'mercadolivre' in p.hostname:
+        query = parse_qs(p.query)
+        identity = ' '.join(query.get('item_id', []) + query.get('pdp_filters', []))
+        m = re.search(r'MLB-?(\d+)', identity, re.I) or re.search(r'MLB-?(\d+)', p.path, re.I)
+        if m:
+            item = m[1]
+            url = ('https://www.mercadolivre.com.br/p/MLB' + item if '/p/' in p.path and not identity
+                   else 'https://produto.mercadolivre.com.br/MLB-' + item + '-_JM')
+            return ('MercadoLivre:' + item, 'Mercado Livre', url)
+    return None
+
+def embedded_product(url):
+    """Reconhece destino explícito em URL da loja, sem executar JavaScript."""
+    candidates = [url]
+    visited = set()
+    for _ in range(4):
+        next_candidates = []
+        for candidate in candidates:
+            if candidate in visited or not safe_url(candidate):
+                continue
+            visited.add(candidate)
+            found = product(candidate)
+            if found:
+                return found
+            parsed = urlparse(candidate)
+            if parsed.hostname not in ('shopee.com.br', 'www.shopee.com.br'):
+                continue
+            args = parse_qs(parsed.query)
+            # Pares explícitos; nunca combina IDs encontrados em blocos diferentes.
+            shop = args.get('shopid', args.get('shop_id', ['']))[0]
+            item = args.get('itemid', args.get('item_id', ['']))[0]
+            if shop.isdigit() and item.isdigit():
+                return product(f'https://shopee.com.br/product/{shop}/{item}')
+            for name in ('url', 'target', 'target_url', 'redirect', 'redirect_url', 'originUrl'):
+                next_candidates.extend(urljoin(candidate, v) for v in args.get(name, []))
+        candidates = next_candidates
+    return None
+
+class PageDestinations(HTMLParser):
+    """Lê apenas o destino principal; não varre links de produtos recomendados."""
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'link' and 'canonical' in (attrs.get('rel') or '').lower().split():
+            self.urls.append(attrs.get('href') or '')
+        elif tag == 'meta':
+            label = (attrs.get('property') or attrs.get('name') or '').lower()
+            if label in ('og:url', 'al:web:url'):
+                self.urls.append(attrs.get('content') or '')
+            elif (attrs.get('http-equiv') or '').lower() == 'refresh':
+                m = re.search(r'url\s*=\s*(.+)', attrs.get('content') or '', re.I)
+                if m:
+                    self.urls.append(m[1].strip().strip('\"\''))
+
+def page_product(content, base_url):
+    parser = PageDestinations()
+    parser.feed(content)
+    found = {}
+    for candidate in parser.urls:
+        result = embedded_product(urljoin(base_url, candidate))
+        if result and urlparse(result[2]).hostname in ('shopee.com.br', 'www.shopee.com.br'):
+            found[result[0]] = result
+    return next(iter(found.values())) if len(found) == 1 else None
+
+def resolve(url, report=None):
+    """Resolve HTTP e metadados principais da Shopee; nunca executa scripts."""
+    report = report or (lambda text: None)
+    confirmed = KNOWN_DESTINATIONS.get(url.split('#', 1)[0].rstrip('/'))
+    if confirmed:
+        known = product(confirmed)
+        if known:
+            report('Destino informado pelo usuário: link reconhecido sem consultar o encurtador.')
+            return known
+    import requests
+    for _ in range(6):
+        if not safe_url(url):
+            report('Redirecionamento para domínio não reconhecido.')
+            return None
+        known = embedded_product(url)
+        if known:
+            return known
+        with requests.get(url, allow_redirects=False, stream=True, timeout=15) as r:
+            report(f'HTTP {r.status_code} em {urlparse(url).hostname}')
+            if r.status_code not in (301, 302, 303, 307, 308):
+                if r.status_code == 200 and urlparse(url).hostname in ('shopee.com.br', 'www.shopee.com.br'):
+                    report('Caminho final: ' + urlparse(url).path[:180])
+                    report('Parâmetros presentes: ' + ', '.join(parse_qs(urlparse(url).query).keys()))
+                    data = bytearray()
+                    for chunk in r.iter_content(16384):
+                        data.extend(chunk)
+                        if len(data) >= 524288:
+                            break
+                    found = page_product(bytes(data[:524288]).decode('utf-8', errors='replace'), url)
+                    if found:
+                        report('Produto encontrado nos metadados principais da página.')
+                        return found
+                    report('Metadados principais não identificaram um produto único.')
+                report('Página sem redirecionamento HTTP; produto não identificado.')
+                return None
+            url = urljoin(url, r.headers.get('Location', ''))
+    report('Limite de redirecionamentos atingido.')
+    return None
+
+def coupon_page_links(text):
+    """Separa URLs rotuladas como página de cupons, sem descartar o produto."""
+    result = set()
+    previous = ''
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        urls = re.findall(r'https?://[^\s<>]+', line)
+        context = re.sub(r'https?://[^\s<>]+', '', line).strip()
+        if not context:
+            context = previous
+        if re.search(r'\bcupons?\b', context, re.I) and re.search(r'resgat|p[aá]gina', context, re.I):
+            result.update(u.rstrip('.,;!?)\"\']') for u in urls)
+        previous = line
+    return result
+
+def extract_links(message):
+    text = message.raw_text or ''
+    links = re.findall(r'https?://[^\s<>]+', text)
+    for entity, value in message.get_entities_text():
+        if getattr(entity, 'url', None):
+            links.append(entity.url)
+    markup = getattr(message, 'reply_markup', None)
+    for row in getattr(markup, 'rows', []) or []:
+        for button in row.buttons:
+            if getattr(button, 'url', None):
+                links.append(button.url)
+    return list(dict.fromkeys(u.rstrip('.,;!?)\"\']') for u in links))
+
+def coupon(text):
+    # Só aceita código junto a um rótulo explícito; não inventa validade.
+    m = re.search(r'\bcupom\s*(?:de\s+desconto\s*)?[:=\-🎟️\s]*[\"`\[]?([A-Z0-9][A-Z0-9_-]{3,29})\b', text, re.I)
+    if not m:
+        return None
+    value = m[1]
+    if value.lower() in {'desconto','disponivel','disponível','aplique','resgate','clique','automatico','automático','loja','vendedor'}:
+        return None
+    if value.isdigit():
+        return None
+    return value
+
+def price(text):
+    amount = r'(\d+(?:\.\d{3})*(?:,\d{2})?)(?![\d.,])'
+    def formatted(value):
+        whole, _, cents = value.replace('.', '').partition(',')
+        return f'{int(whole):,}'.replace(',', '.') + ',' + (cents or '00')
+    m = re.search(r'\bpor\s*:?\s*R\$\s*' + amount, text, re.I)
+    if m:
+        return formatted(m[1])
+    values = re.findall(r'^\s*(?:💰|✅|preço\s*:)?\s*R\$\s*' + amount + r'\s*$', text, re.I | re.M)
+    return formatted(values[0]) if len(values) == 1 else None
+
+def caption(offer):
+    # Descrição própria: não reproduz a mensagem comercial do grupo.
+    text = '🛍️ <b>Oferta na ' + html.escape(offer['store']) + '</b>\n'
+    if offer.get('name'):
+        text += html.escape(offer['name'][:160]) + '\n'
+    if offer.get('price'):
+        text += '💰 Preço informado na origem: R$ ' + html.escape(offer['price']) + '\n'
+    if offer.get('coupon'):
+        text += '🎟️ Cupom informado: <code>' + html.escape(offer['coupon']) + '</code>\n'
+        text += 'Confira as condições e a validade do cupom na loja.\n'
+    if offer.get('affiliate_generated'):
+        text += '🔗 Link de afiliado: podemos receber comissão por compras elegíveis.\n'
+    return text + '⚠️ Confirme preço, frete e disponibilidade antes da compra.'
+
+class Ledger:
+    def __init__(self, path):
+        self.db = sqlite3.connect(path, timeout=30)
+        self.db.execute('PRAGMA journal_mode=WAL')
+        self.db.execute('CREATE TABLE IF NOT EXISTS posts (product TEXT, day TEXT, status TEXT, message_id INTEGER, PRIMARY KEY(product, day))')
+        self.db.commit()
+
+    def reserve(self, product_id, moment=None):
+        day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
+        with self.db:
+            result = self.db.execute('INSERT OR IGNORE INTO posts VALUES (?, ?, ?, NULL)', (product_id, day, 'sending'))
+        return day if result.rowcount else None
+
+    def finish(self, product_id, day, message_id):
+        with self.db:
+            self.db.execute('UPDATE posts SET status=?, message_id=? WHERE product=? AND day=?', ('sent', message_id, product_id, day))
+
+    def release(self, product_id, day):
+        with self.db:
+            self.db.execute('DELETE FROM posts WHERE product=? AND day=? AND status=?', (product_id, day, 'sending'))

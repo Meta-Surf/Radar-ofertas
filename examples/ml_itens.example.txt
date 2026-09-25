@@ -1,0 +1,2 @@
+# Copie para ml_itens.txt e inclua os IDs ou URLs que deseja acompanhar.
+# Um anúncio por linha. Exemplo de formato: MLB1234567890
