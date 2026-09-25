@@ -112,6 +112,9 @@ class ShopeeAffiliate:
         return {}
 
     def prepare(self, offer):
+        if offer.get('source') == 'shopee_api':
+            from radar_shopee import refresh
+            offer = refresh(self, offer)
         output = dict(offer)
         output['affiliate_url'] = self.generate_link(offer['url'])
         output['affiliate_generated'] = True

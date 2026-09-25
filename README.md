@@ -42,6 +42,10 @@ Copy-Item .env.example .env
 
 Se já possui `.env`, preserve-o e não execute o comando de cópia sobre ele. Preencha as credenciais no arquivo local. O `.env.example` contém apenas nomes e padrões sem segredos. Para compatibilidade com as instruções anteriores, também existe `.env.exemplo`.
 
+## Radar direto Shopee
+
+Busca ofertas pela API sem depender dos grupos. Comece com `py radar_shopee.py --buscar "fone bluetooth"` (prévia sem publicação). Veja [filtros, simulação e execução automática](docs/radar-shopee.md). A consulta de campanhas não valida códigos de cupom.
+
 ## Shopee + Telegram
 
 Teste a geração de um link com uma URL real de produto:
@@ -79,7 +83,7 @@ A autenticação OAuth não garante acesso a todos os anúncios nem habilita uma
 .\.venv\Scripts\python.exe -m unittest discover -p "test_*.py" -v
 ```
 
-Os 33 testes existentes passaram na preparação deste repositório. Usam respostas simuladas; não fazem compras nem publicações reais. Essa cobertura se concentra nos componentes de monitoramento/Shopee; não comprova o funcionamento real do radar Mercado Livre.
+A suíte inclui testes do monitor, da integração de afiliados e do radar direto Shopee. Usam respostas simuladas; não fazem compras nem publicações reais. Essa cobertura se concentra nos componentes de monitoramento/Shopee; não comprova o funcionamento real do radar Mercado Livre.
 
 ## O que fica fora do Git
 

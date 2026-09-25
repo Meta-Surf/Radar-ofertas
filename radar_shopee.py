@@ -1,0 +1,185 @@
+"""Busca direta na API Shopee. Padrão: prévia sem fila ou publicação."""
+import argparse
+import json
+import os
+import tempfile
+import time
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_image_url
+
+BASE = Path(__file__).resolve().parent
+FIELDS = ('shopId itemId productName imageUrl priceMin priceMax '
+          'priceDiscountRate ratingStar sales periodStartTime periodEndTime')
+
+
+def number(value):
+    result = Decimal(str(value))
+    if not result.is_finite():
+        raise ValueError('Número inválido')
+    return result
+
+
+def money(value):
+    return f'{value:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+
+
+def active(node, now):
+    # Datas ausentes/zero não comprovam período ativo: omite por precaução.
+    try:
+        start, end = int(node['periodStartTime']), int(node['periodEndTime'])
+        return 0 < start <= now < end
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
+def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, now=None):
+    now = time.time() if now is None else now
+    try:
+        shop, item = str(node['shopId']), str(node['itemId'])
+        if not shop.isdigit() or not item.isdigit() or int(shop) <= 0 or int(item) <= 0:
+            return None
+        low, high = number(node['priceMin']), number(node['priceMax'])
+        discount, rating, sales = number(node['priceDiscountRate']), number(node['ratingStar']), number(node['sales'])
+        if (not active(node, now) or not 0 < low <= high or
+                not minimum_discount <= discount <= 100 or
+                not minimum_rating <= rating <= 5 or sales < minimum_sales or
+                not valid_image_url(node.get('imageUrl')) or not node.get('productName')):
+            return None
+        stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
+        return {'product_id': f'Shopee:{shop}:{item}', 'store': 'Shopee',
+                'url': f'https://shopee.com.br/product/{shop}/{item}',
+                'name': str(node['productName'])[:160], 'price': money(low),
+                'price_from': high > low, 'discount': float(discount),
+                'rating': float(rating), 'sales': int(sales),
+                'api_image': node['imageUrl'], 'image': None, 'coupon': None,
+                'source': 'shopee_api', 'captured_at': stamp, 'source_date': stamp,
+                'filter_discount': minimum_discount, 'filter_rating': minimum_rating,
+                'filter_sales': minimum_sales}
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return None
+
+
+def connection(client, operation, args, fields):
+    data = client.request(f'{{ {operation}({args}) {{ nodes {{ {fields} }} pageInfo {{ hasNextPage }} }} }}')
+    result = data.get(operation)
+    if not isinstance(result, dict) or not isinstance(result.get('nodes'), list):
+        raise AffiliateError('A Shopee retornou uma lista inesperada. Nenhuma oferta foi enfileirada.')
+    return result
+
+
+def collect(client, keyword='', pages=2, minimum_discount=20, minimum_rating=4.5, minimum_sales=50):
+    found, scanned = {}, 0
+    for page in range(1, pages + 1):
+        args = f'page: {page}, limit: 20, sortType: 2'
+        if keyword:
+            args += ', keyword: ' + json.dumps(keyword)
+        result = connection(client, 'productOfferV2', args, FIELDS)
+        for node in result['nodes']:
+            scanned += 1
+            if not isinstance(node, dict):
+                continue
+            offer = candidate(node, minimum_discount, minimum_rating, minimum_sales)
+            if offer:
+                found[offer['product_id']] = offer
+        if not (result.get('pageInfo') or {}).get('hasNextPage'):
+            break
+    return sorted(found.values(), key=lambda x: (-x['discount'], -x['rating'], -x['sales'])), scanned
+
+
+def refresh(client, offer):
+    """Reconsulta preços e filtros imediatamente antes de gerar o link/publicar."""
+    _, shop, item = offer['product_id'].split(':')
+    if not shop.isdigit() or not item.isdigit():
+        raise AffiliateError('Identificação do produto inválida.')
+    result = connection(client, 'productOfferV2', f'shopId: {shop}, itemId: {item}, limit: 1', FIELDS)
+    for node in result['nodes']:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get('shopId')) == shop and str(node.get('itemId')) == item:
+            updated = candidate(node, offer.get('filter_discount', 20),
+                                offer.get('filter_rating', 4.5), offer.get('filter_sales', 50))
+            if updated:
+                return updated
+    raise AffiliateError('Oferta Shopee indisponível ou fora dos filtros na revalidação; envio bloqueado.')
+
+
+def save_snapshot(offers, path):
+    # Fila própria: não disputa escrita com o monitor Telegram nem cresce a cada ciclo.
+    name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         suffix='.tmp', delete=False) as stream:
+            name = stream.name
+            for offer in offers:
+                stream.write(json.dumps(offer, ensure_ascii=False) + '\n')
+        os.replace(name, path)
+    finally:
+        if name and os.path.exists(name):
+            os.unlink(name)
+
+
+def main():
+    from dotenv import load_dotenv
+    load_dotenv(BASE / '.env', encoding='utf-8-sig')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--buscar', default='', help='Palavra ou frase, como fone bluetooth.')
+    parser.add_argument('--desconto-min', type=float, default=20)
+    parser.add_argument('--nota-min', type=float, default=4.5)
+    parser.add_argument('--vendas-min', type=int, default=50)
+    parser.add_argument('--paginas', type=int, default=2)
+    parser.add_argument('--enfileirar', action='store_true', help='Disponibiliza ofertas ao publicador ativo.')
+    parser.add_argument('--loop', action='store_true', help='Repete a consulta até Ctrl+C.')
+    parser.add_argument('--intervalo', type=int, default=900, help='Segundos entre consultas; mínimo 300.')
+    parser.add_argument('--campanhas', action='store_true', help='Mostra campanhas ativas, sem publicar ou validar cupons.')
+    args = parser.parse_args()
+    if not (0 <= args.desconto_min <= 100 and 0 <= args.nota_min <= 5 and args.vendas_min >= 0
+            and 1 <= args.paginas <= 10 and args.intervalo >= 300):
+        parser.error('Use desconto 0–100, nota 0–5, vendas >= 0, páginas 1–10 e intervalo >= 300.')
+    if args.campanhas and (args.enfileirar or args.loop):
+        parser.error('--campanhas é uma consulta única, sem enfileiramento.')
+    try:
+        client = ShopeeAffiliate.from_env()
+        if args.campanhas:
+            result = connection(client, 'shopeeOfferV2', 'page: 1, limit: 20',
+                                'offerName periodStartTime periodEndTime')
+            count = 0
+            for node in result['nodes']:
+                if isinstance(node, dict) and active(node, time.time()):
+                    print(str(node.get('offerName', 'Campanha'))[:200])
+                    count += 1
+            print(f'{count} campanhas ativas nesta página. Códigos e elegibilidade de cupons não são validados por esta consulta.')
+            return
+        print('Modo fila: o publicador ativo poderá publicar.' if args.enfileirar else 'Prévia: nenhuma fila será alterada e nada será publicado.')
+        while True:
+            try:
+                offers, scanned = collect(client, args.buscar, args.paginas, args.desconto_min, args.nota_min, args.vendas_min)
+                print(f'Consultados: {scanned} | Aprovados nos filtros: {len(offers)}')
+                for offer in offers:
+                    prefix = 'a partir de ' if offer['price_from'] else ''
+                    print(f"{offer['name']} | {prefix}R$ {offer['price']} | desconto informado {offer['discount']:g}% | nota {offer['rating']:g} | vendas {offer['sales']}")
+                if args.enfileirar:
+                    save_snapshot(offers, BASE / 'fila_shopee_api.jsonl')
+                    print('Fila Shopee atualizada. O publicador gera seu link e controla repetição diária.')
+                elif not offers:
+                    print('Tente outra busca ou ajuste os filtros; esta consulta não cobre todo o catálogo.')
+            except AffiliateError:
+                if args.enfileirar:
+                    save_snapshot([], BASE / 'fila_shopee_api.jsonl')
+                raise
+            if not args.loop:
+                break
+            time.sleep(args.intervalo)
+    except AffiliateError as error:
+        parser.exit(1, str(error) + '\n')
+    except OSError:
+        parser.exit(1, 'Não foi possível atualizar a fila local. Confira permissões e se outro radar está rodando.\n')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('Radar Shopee encerrado.')

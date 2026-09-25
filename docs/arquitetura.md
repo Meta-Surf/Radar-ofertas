@@ -4,7 +4,7 @@
 
 1. `monitor_ofertas.py` recebe mensagens novas dos chats configurados via Telethon e extrai candidatos.
 2. `ofertas_core.py` centraliza identificação de produtos, dados das ofertas e registro diário de publicação.
-3. A fila local `ofertas_para_revisar.jsonl` conecta o monitor ao publicador.
+3. A fila local `fila_ofertas_v2.jsonl` conecta o monitor ao publicador.
 4. `bot_ofertas_revisao.py` filtra candidatos e chama `shopee_afiliados.py` para gerar o link afiliado e consultar dados do produto.
 5. O publicador envia a oferta ao canal pela API do bot. O SQLite registra reservas/publicações para evitar repetição diária.
 
@@ -21,3 +21,7 @@ Amazon, Instagram e WhatsApp permanecem pendentes.
 Execute os comandos na raiz do projeto. Credenciais, sessão, filas, imagens coletadas e banco permanecem no computador de execução e estão excluídos do Git. O GitHub armazena código e documentação; enviar o projeto não inicia os bots nem mantém o computador ligado.
 
 A automação do GitHub executa somente testes com serviços simulados. Não necessita de secrets de produção.
+
+## Descoberta direta Shopee
+
+`radar_shopee.py` consulta produtos e substitui atomicamente `fila_shopee_api.jsonl`. O publicador lê ambas as filas e usa o mesmo registro diário. Ofertas da API são revalidadas antes da geração do link. Consulte [o guia do radar](radar-shopee.md).

@@ -209,7 +209,10 @@ def caption(offer):
     if offer.get('name'):
         text += html.escape(offer['name'][:160]) + '\n'
     if offer.get('price'):
-        text += '💰 Preço informado na origem: R$ ' + html.escape(offer['price']) + '\n'
+        label = ('💰 Preço na API Shopee: ' + ('a partir de ' if offer.get('price_from') else '')) if offer.get('source') == 'shopee_api' else '💰 Preço informado na origem: '
+        text += label + 'R$ ' + html.escape(offer['price']) + '\n'
+    if offer.get('source') == 'shopee_api' and offer.get('discount') is not None:
+        text += '📉 Desconto informado pela Shopee: ' + html.escape(str(offer['discount'])) + '%\n'
     if offer.get('coupon'):
         text += '🎟️ Cupom informado: <code>' + html.escape(offer['coupon']) + '</code>\n'
         text += 'Confira as condições e a validade do cupom na loja.\n'

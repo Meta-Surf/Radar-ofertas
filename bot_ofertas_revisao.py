@@ -15,17 +15,18 @@ BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
 
 def rows():
-    path = BASE / 'fila_ofertas_v2.jsonl'
-    if not path.exists():
-        return
-    with path.open(encoding='utf-8') as f:
-        for line in f:
+    for name in ('fila_ofertas_v2.jsonl', 'fila_shopee_api.jsonl'):
+        path = BASE / name
+        if not path.exists():
+            continue
+        # Fecha o arquivo antes de processar: permite substituir a fila no Windows.
+        for line in path.read_text(encoding='utf-8').splitlines():
             try:
                 value = json.loads(line)
                 if isinstance(value, dict):
                     yield value
             except json.JSONDecodeError:
-                continue  # O monitor pode estar escrevendo a última linha.
+                continue
 
 def photo_path(offer):
     value = offer.get('image')
