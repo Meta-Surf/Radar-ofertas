@@ -33,6 +33,13 @@ class RadarTests(unittest.TestCase):
         self.assertIn('&lt;Bluetooth&gt;', caption(offer))
         self.assertIsNone(offer['coupon'])
 
+    def test_decimal_threshold_includes_exact_boundary(self):
+        self.assertIsNotNone(candidate(node(ratingStar='4.9'), minimum_rating=4.9))
+        self.assertIsNone(candidate(node(ratingStar='4.89'), minimum_rating=4.9))
+        self.assertIsNotNone(candidate(node(ratingStar='4.91'), minimum_rating=4.9))
+        self.assertIsNotNone(candidate(node(priceDiscountRate='50.1'), minimum_discount=50.1))
+        self.assertIsNone(candidate(node(priceDiscountRate='50.09'), minimum_discount=50.1))
+
     def test_filters_and_bad_data(self):
         for bad in ({'priceDiscountRate': 19}, {'ratingStar': '4.4'}, {'sales': 49},
                     {'priceMin': 'NaN'}, {'priceMax': '1'}, {'shopId': -1},

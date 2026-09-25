@@ -44,8 +44,8 @@ def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, n
         low, high = number(node['priceMin']), number(node['priceMax'])
         discount, rating, sales = number(node['priceDiscountRate']), number(node['ratingStar']), number(node['sales'])
         if (not active(node, now) or not 0 < low <= high or
-                not minimum_discount <= discount <= 100 or
-                not minimum_rating <= rating <= 5 or sales < minimum_sales or
+                not number(minimum_discount) <= discount <= 100 or
+                not number(minimum_rating) <= rating <= 5 or sales < number(minimum_sales) or
                 not valid_image_url(node.get('imageUrl')) or not node.get('productName')):
             return None
         stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
