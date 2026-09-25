@@ -204,21 +204,23 @@ def price(text):
     return formatted(values[0]) if len(values) == 1 else None
 
 def caption(offer):
-    # Descrição própria: não reproduz a mensagem comercial do grupo.
-    text = '🛍️ <b>Oferta na ' + html.escape(offer['store']) + '</b>\n'
+    # Texto enxuto; não acrescenta características ou condições não confirmadas.
+    parts = ['🛍️ <b>' + html.escape(offer['store'].upper()) + '</b>']
     if offer.get('name'):
-        text += html.escape(offer['name'][:160]) + '\n'
+        name = ' '.join(str(offer['name']).split())
+        if len(name) > 160:
+            name = name[:157].rsplit(' ', 1)[0] + '…'
+        parts.append('<b>' + html.escape(name) + '</b>')
     if offer.get('price'):
-        label = ('💰 Preço na API Shopee: ' + ('a partir de ' if offer.get('price_from') else '')) if offer.get('source') == 'shopee_api' else '💰 Preço informado na origem: '
-        text += label + 'R$ ' + html.escape(offer['price']) + '\n'
-    if offer.get('source') == 'shopee_api' and offer.get('discount') is not None:
-        text += '📉 Desconto informado pela Shopee: ' + html.escape(str(offer['discount'])) + '%\n'
+        prefix = 'a partir de ' if offer.get('price_from') else ''
+        parts.append('💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>')
     if offer.get('coupon'):
-        text += '🎟️ Cupom informado: <code>' + html.escape(offer['coupon']) + '</code>\n'
-        text += 'Confira as condições e a validade do cupom na loja.\n'
+        parts.append('🎟️ Cupom: <code>' + html.escape(offer['coupon']) + '</code>'
+                     + '\nConfira as condições do cupom na loja.')
+    parts.append('⚠️ Preço e disponibilidade sujeitos a alteração.')
     if offer.get('affiliate_generated'):
-        text += '🔗 Link de afiliado: podemos receber comissão por compras elegíveis.\n'
-    return text + '⚠️ Confirme preço, frete e disponibilidade antes da compra.'
+        parts.append('(ANÚNCIO)')
+    return '\n\n'.join(parts)
 
 class Ledger:
     def __init__(self, path):

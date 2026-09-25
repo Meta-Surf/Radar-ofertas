@@ -70,7 +70,7 @@ class AffiliateTests(unittest.TestCase):
         p.send('FAKE_TOKEN','@teste',offer,None)
         data=p.requests.post.call_args.kwargs['data']
         self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'][0][0]['url'],LINK)
-        self.assertIn('comissão',data['text'])
+        self.assertIn('(ANÚNCIO)',data['text'])
     def test_send_without_affiliate_never_calls_telegram(self):
         p=self.publisher()
         with self.assertRaises(AffiliateError):
