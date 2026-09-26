@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -11,14 +12,40 @@ import radar_shopee_continuo as radar
 
 
 class IntegrationTests(unittest.TestCase):
-    def test_both_sources_are_interleaved(self):
+    def test_radar_wait_does_not_delay_groups_or_reset_on_group_send(self):
+        def offer(item, source):
+            return dict(product_id=f'Shopee:1:{item}', url=f'https://shopee.com.br/product/1/{item}',
+                        source=source, source_date=datetime.now(timezone.utc).isoformat(),
+                        api_image='https://x.susercontent.com/a.jpg')
+        g1, g2 = offer(1, 'telegram'), offer(2, 'telegram')
+        r1, r2 = offer(3, 'shopee_api'), offer(4, 'shopee_api')
+        client = Mock()
+        client.prepare.side_effect = lambda o: dict(o)
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            try:
+                with patch.object(publisher, 'Ledger', return_value=ledger), \
+                     patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                     patch.object(publisher, 'rows', side_effect=[iter([r1, g1]), iter([r1]), iter([r2, g2]), iter([r2])]), \
+                     patch.object(publisher, 'send', return_value=(123, 0)) as send, \
+                     patch.object(publisher.time, 'sleep', side_effect=[None, None, None, KeyboardInterrupt]), \
+                     patch('ofertas_core.time.time', return_value=1000), \
+                     patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                     patch('builtins.print'):
+                    with self.assertRaises(KeyboardInterrupt):
+                        publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+                    self.assertEqual([call.args[2]['product_id'] for call in send.call_args_list],
+                                     ['Shopee:1:1', 'Shopee:1:3', 'Shopee:1:2'])
+                    self.assertEqual(ledger.publication_delay(clock_id=2), 600)
+            finally:
+                ledger.db.close()
+
+    def test_groups_have_priority_over_all_radar_offers(self):
         offers = [dict(product_id='g1', source_date='2026-01-01'),
                   dict(product_id='g2', source_date='2026-01-02'),
                   dict(product_id='r1', source='shopee_api')]
         with patch.object(publisher, 'rows', return_value=iter(offers)):
-            self.assertEqual([o['product_id'] for o in publisher.ordered_rows('telegram')], ['g2', 'r1', 'g1'])
-        with patch.object(publisher, 'rows', return_value=iter(offers)):
-            self.assertEqual([o['product_id'] for o in publisher.ordered_rows('radar')], ['r1', 'g2', 'g1'])
+            self.assertEqual([o['product_id'] for o in publisher.ordered_rows()], ['g2', 'g1', 'r1'])
 
     def test_cooldown_survives_restart(self):
         with tempfile.TemporaryDirectory() as d:
