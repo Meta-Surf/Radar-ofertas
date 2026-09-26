@@ -10,6 +10,7 @@ import requests
 from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
+from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -93,6 +94,7 @@ def run_publisher(args, parser):
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     announced = set()
     retry_at = {}
+    prepared_coupons = {}
     print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador afiliado Shopee ativo. Ctrl+C para parar.')
     while True:
         if not args.simular:
@@ -102,15 +104,19 @@ def run_publisher(args, parser):
                 continue
         for offer in ordered_rows():
             key = offer.get('product_id')
-            checked = product(offer.get('url', ''))
-            if not checked or checked[0] != key or checked[2] != offer['url']:
+            is_coupon = offer.get('kind') == 'coupon_alert'
+            if not isinstance(key, str):
                 continue
-            offer['store'] = checked[1]
-            if checked[1] != 'Shopee':
-                if key not in announced:
-                    print('Aguardando integração de afiliados da loja:', checked[1])
-                    announced.add(key)
-                continue
+            if not is_coupon:
+                checked = product(offer.get('url', ''))
+                if not checked or checked[0] != key or checked[2] != offer['url']:
+                    continue
+                offer['store'] = checked[1]
+                if checked[1] != 'Shopee':
+                    if key not in announced:
+                        print('Aguardando integração de afiliados da loja:', checked[1])
+                        announced.add(key)
+                    continue
             try:
                 age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
             except (KeyError, TypeError, ValueError):
@@ -121,6 +127,19 @@ def run_publisher(args, parser):
                 continue
             if args.simular and key in announced:
                 continue
+            if is_coupon:
+                raw_key = key
+                try:
+                    if raw_key not in prepared_coupons:
+                        prepared_coupons[raw_key] = prepare_alert(affiliate, offer)
+                    offer = prepared_coupons[raw_key]
+                    key = offer['product_id']
+                except AffiliateError as error:
+                    print(str(error))
+                    retry_at[raw_key] = time.monotonic() + 300
+                    continue
+                if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
+                    continue
             origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
             if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
                 continue
@@ -129,7 +148,8 @@ def run_publisher(args, parser):
                 continue
             theme = offer.get('tema_radar')
             try:
-                offer = affiliate.prepare(offer)
+                if not is_coupon:
+                    offer = affiliate.prepare(offer)
                 if theme:
                     from radar_shopee_continuo import pertence_ao_tema
                     if not pertence_ao_tema(theme, offer):
@@ -140,8 +160,8 @@ def run_publisher(args, parser):
                 print(str(e))
                 retry_at[key] = time.monotonic() + 300
                 continue
-            image = offer.get('api_image') or photo_path(offer)
-            if require_photo and not image:
+            image = banner_path(BASE) if is_coupon else (offer.get('api_image') or photo_path(offer))
+            if require_photo and not image and not is_coupon:
                 if key not in announced:
                     print('Aguardando imagem autorizada:', key)
                     announced.add(key)
@@ -151,14 +171,16 @@ def run_publisher(args, parser):
                 continue
             if args.simular:
                 if key not in announced:
-                    print('\n', key, '\n', caption(offer), '\n', offer['affiliate_url'], '\nImagem:', bool(image))
+                    preview = alert_caption(offer) if is_coupon else caption(offer)
+                    links = [e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']]
+                    print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                     announced.add(key)
                 continue
             try:
                 # Grava antes do envio: falha ou reinício não encurta a pausa.
                 if origin == 'radar':
                     ledger.mark_attempt(interval, clock_id=2)
-                message_id, wait = send(token, channel, offer, image)
+                message_id, wait = (send_alert if is_coupon else send)(token, channel, offer, image)
             except Exception:
                 print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                       '(Confira o canal; detalhes sensíveis foram omitidos.)')

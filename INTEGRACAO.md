@@ -1,4 +1,49 @@
-# Grupos + radar Shopee
+# Cupons + grupos + radar Shopee
+
+## Alertas de cupons
+
+O monitor captura também mensagens novas cujo título indica cupom/cupons e
+links explicitamente rotulados como páginas para resgatar cupons. Cada aviso
+recebe texto próprio e até seis botões, um por link. Condições textuais junto
+ao link, como `R$ 10 OFF em R$ 119`, são preservadas; nomes e chamadas para
+grupos de terceiros não são copiados. Valores existentes somente na imagem
+não são inferidos. Links de produtos identificados não são tratados como cupons.
+
+O publicador resolve cada destino e pede um novo link à API com as credenciais
+e o `SHOPEE_SUB_ID` do seu `.env`. Se algum destino não for resolvido, estiver
+fora dos domínios permitidos ou a conversão falhar, o aviso não é publicado.
+Não há fallback para links do afiliado original. O encurtador `desconto.games`,
+presente no exemplo, só é aceito quando revela um destino Shopee por HTTP.
+Páginas que exigem JavaScript ou bloqueiam a resolução ficam pendentes.
+
+Cupons entram na mesma prioridade das ofertas dos grupos, sem aguardar o
+relógio de 10 minutos do radar. A identidade do alerta usa destinos resolvidos,
+condições e data de origem; avisos iguais no mesmo dia não são reenviados,
+inclusive após reiniciar. Os limites de espera pedidos pelo Telegram continuam
+valendo para todos. Alertas com condições ou datas diferentes são novos avisos.
+
+### Banner aprovado
+
+Salve a imagem aprovada em `assets/banner_cupons.png`, criando a pasta `assets`
+se necessário. Ou configure `CUPONS_BANNER` no `.env` com o caminho da imagem.
+Essa imagem ainda precisa ser reenviada pelo usuário e não acompanha este
+pacote. O bot não reutiliza as imagens dos grupos nos alertas. Sem o arquivo,
+envia texto e botões. Se o texto exceder a legenda de uma foto, envia texto
+completo e botões para não cortar condições.
+
+### Diagnóstico sem publicação
+
+Execute na pasta do bot com seu `.env` existente:
+
+```powershell
+py cupons_shopee.py --testar "https://s.shopee.com.br/387hsEM3Dd" "https://s.shopee.com.br/5LCCSDMbNx"
+```
+
+Também aceita mais de um link e o encurtador `desconto.games`. O diagnóstico
+consulta a Shopee, mas não escreve filas nem publica no Telegram. Para uma
+prévia dos avisos já captados use `py bot_ofertas_revisao.py --simular`.
+Sucesso nos testes locais não comprova que a API aceita cada cupom real;
+essa consulta precisa ser feita com a conta configurada no computador do bot.
 
 ## Instalação
 

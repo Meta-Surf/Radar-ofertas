@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from ofertas_core import extract_links, resolve, price, coupon, coupon_page_links, safe_url
+from cupons_shopee import build_alerts, coupon_entries
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -67,10 +68,12 @@ async def main():
             print('Preço identificado:', price(raw))
             print('Código de cupom explícito:', coupon(raw) or 'ausente')
             print('Foto nesta mensagem:', bool(message.photo), '| pertence a álbum:', bool(message.grouped_id))
-            excluded = coupon_page_links(raw)
+            entries = coupon_entries([message])
+            print('Links identificados para alerta de cupons:', len(entries))
+            excluded = coupon_page_links(raw) | {e['url'] for e in entries}
             for i, url in enumerate(extract_links(message), 1):
                 if url in excluded:
-                    print('Link', i, ': página de cupons; não é tratado como produto.')
+                    print('Link', i, ': candidato a alerta de cupons; use cupons_shopee.py --testar para converter sem publicar.')
                 elif not safe_url(url):
                     print('Link', i, ': fora das lojas reconhecidas.')
                 else:
@@ -90,7 +93,13 @@ async def main():
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
-            excluded = coupon_page_links(text)
+            alerts = build_alerts(messages, chat_id)
+            if alerts:
+                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                    for alert in alerts:
+                        out.write(json.dumps(alert, ensure_ascii=False) + '\n')
+                print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
+            excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
             products = {}
             for url in urls:

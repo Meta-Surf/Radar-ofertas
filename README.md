@@ -94,3 +94,10 @@ O arquivo `.session` permite acesso à conta Telegram. Não faça upload do paco
 ## Atualizações
 
 Depois de configurar o repositório remoto, mantenha esta estrutura de arquivos e envie apenas alterações revisadas de código e documentação. Não habilite envios de ofertas por workflows do GitHub: os testes automatizados não precisam de tokens reais.
+
+
+## Cupons e publicação integrada
+
+Consulte [INTEGRACAO.md](INTEGRACAO.md) para instalar os alertas de cupons,
+prioridade das ofertas dos grupos e radar com intervalo de 10 minutos.
+Diagnóstico sem envio: `py cupons_shopee.py --testar "URL_DO_CUPOM"`.
