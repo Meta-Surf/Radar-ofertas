@@ -164,7 +164,10 @@ def run_round(args, parser):
         interval = max(300, int(os.getenv('INTERVALO_PUBLICACOES', '300')))
     except Exception:
         parser.exit(1, 'Confira SHOPEE_APP_ID, SHOPEE_SECRET e INTERVALO_PUBLICACOES no .env.\n')
-    print('PUBLICAÇÃO REAL. Destino:', channel) if args.publicar else print('PRÉVIA: nada será publicado.')
+    if args.enfileirar:
+        print('RADAR PARA FILA: o publicador unificado fará os envios.')
+    else:
+        print('PUBLICAÇÃO REAL. Destino:', channel) if args.publicar else print('PRÉVIA: nada será publicado.')
     print('Filtros: desconto informado >=20%, nota >=4,5 e vendas >=50; imagem e período ativo.')
     print(f'Tecnologia: {len(TEMAS)} temas, com filtros de título por categoria. Ranking não comprova menor preço histórico.')
     groups = []
@@ -173,6 +176,9 @@ def run_round(args, parser):
             offers, scanned = collect(client, query, pages=2, minimum_discount=20,
                                       minimum_rating=4.5, minimum_sales=50)
         except Exception:
+            if args.enfileirar:
+                from radar_shopee import save_snapshot
+                save_snapshot([], base / 'fila_shopee_api.jsonl')
             parser.exit(1, f'Consulta falhou em {theme}. Nada foi enviado nesta rodada. Rode py radar_shopee.py --buscar "{query}" para diagnóstico.\n')
         aprovados_api = len(offers)
         offers = [dict(o, tema_radar=theme) for o in offers if pertence_ao_tema(theme, o)]
@@ -180,7 +186,7 @@ def run_round(args, parser):
         groups.append((theme, offers))
         time.sleep(1)
     # Retira publicadas e reservas incertas de qualquer data antes do ranking.
-    if args.publicar:
+    if args.publicar or args.enfileirar:
         registry = Ledger(base / 'publicacoes.sqlite3')
         try:
             blocked = {row[0] for row in registry.db.execute(
@@ -198,6 +204,11 @@ def run_round(args, parser):
         selected = select(chosen, args.limite, preserve_order=True)
     else:
         selected = select(groups, args.limite)
+    if args.enfileirar:
+        from radar_shopee import save_snapshot
+        save_snapshot([offer for _, offer in selected], base / 'fila_shopee_api.jsonl')
+        print(f'Fila do radar atualizada: {len(selected)} ofertas. Envio exclusivo pelo publicador unificado.')
+        return
     if not selected:
         print('Nenhuma oferta elegível. Nenhum envio realizado; filtros preservados.')
         return
@@ -239,12 +250,25 @@ def run_round(args, parser):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--publicar', action='store_true', help='Envia ao TELEGRAM_CANAL configurado no .env.')
+    parser.add_argument('--enfileirar', action='store_true', help='Entrega ofertas ao publicador unificado, sem envio direto.')
     parser.add_argument('--loop', action='store_true', help='Mantém a consulta e publicação periódicas até Ctrl+C.')
     parser.add_argument('--intervalo', type=int, default=300, help='Segundos entre rodadas; padrão 300 (5 min).')
     parser.add_argument('--limite', type=int, default=1, choices=range(1, 4), help='Máximo por rodada; padrão 1.')
     args = parser.parse_args()
+    if args.publicar and args.enfileirar:
+        parser.error('Escolha --publicar OU --enfileirar.')
     if args.intervalo < 300:
         parser.error('--intervalo deve ser pelo menos 300 segundos.')
+    from execucao_unica import instancia_unica
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        stack.enter_context(instancia_unica(Path(__file__).resolve().parent / 'radar.lock'))
+        if args.publicar:
+            stack.enter_context(instancia_unica(Path(__file__).resolve().parent / 'publicador.lock'))
+        run_loop(args, parser)
+
+
+def run_loop(args, parser):
     args.round_index = 0
     while True:
         started = time.monotonic()
