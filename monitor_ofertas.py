@@ -10,7 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
-from ofertas_core import extract_links, resolve, price, coupon, coupon_page_links, safe_url
+from ofertas_core import extract_links, resolve, price, price_info, coupon, coupon_page_links, safe_url
+from cupons_shopee import build_alerts, coupon_entries
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -65,12 +66,15 @@ async def main():
                 return
             raw = message.raw_text or ''
             print('Preço identificado:', price(raw))
+            print('Condição do preço:', (price_info(raw) or {}).get('price_condition') or 'ausente')
             print('Código de cupom explícito:', coupon(raw) or 'ausente')
             print('Foto nesta mensagem:', bool(message.photo), '| pertence a álbum:', bool(message.grouped_id))
-            excluded = coupon_page_links(raw)
+            entries = coupon_entries([message])
+            print('Links identificados para alerta de cupons:', len(entries))
+            excluded = coupon_page_links(raw) | {e['url'] for e in entries}
             for i, url in enumerate(extract_links(message), 1):
                 if url in excluded:
-                    print('Link', i, ': página de cupons; não é tratado como produto.')
+                    print('Link', i, ': candidato a alerta de cupons; use cupons_shopee.py --testar para converter sem publicar.')
                 elif not safe_url(url):
                     print('Link', i, ': fora das lojas reconhecidas.')
                 else:
@@ -90,7 +94,13 @@ async def main():
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
-            excluded = coupon_page_links(text)
+            alerts = build_alerts(messages, chat_id)
+            if alerts:
+                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                    for alert in alerts:
+                        out.write(json.dumps(alert, ensure_ascii=False) + '\n')
+                print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
+            excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
             products = {}
             for url in urls:
@@ -108,6 +118,8 @@ async def main():
                     print('Ignorada: não foi possível resolver o link do produto.', chat_id, messages[0].id)
                 return
             key, store, direct_url = next(iter(products.values()))
+            if store != 'Shopee':
+                return
             image = None
             if str(chat_id) in allowed_media:
                 photo = next((m for m in messages if m.photo), None)
@@ -121,14 +133,20 @@ async def main():
                             target.unlink()
                     except Exception:
                         logging.warning('Imagem indisponível na mensagem %s.', photo.id)
-            row = {'product_id': key, 'store': store, 'url': direct_url,
-                   'price': price(text), 'coupon': coupon(text), 'image': image,
+            captured_price = price_info(text) or {}
+            row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
+                   'price': captured_price.get('price'),
+                   'price_condition': captured_price.get('price_condition', ''),
+                   'price_from': captured_price.get('price_from', False),
+                   'coupon': coupon(text), 'image': image,
                    'chat_id': chat_id, 'message_id': messages[0].id,
                    'captured_at': datetime.now(timezone.utc).isoformat(),
                    'source_date': messages[0].date.isoformat()}
             with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                 out.write(json.dumps(row, ensure_ascii=False) + '\n')
-            print('Oferta captada:', key, '| imagem:', bool(image), '| cupom:', row['coupon'] or 'não identificado')
+            print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
+                  '| condição:', row['price_condition'] or 'nenhuma',
+                  '| imagem:', bool(image), '| cupom:', row['coupon'] or 'não identificado')
 
         @client.on(events.NewMessage(chats=selected))
         async def receive(event):
@@ -146,6 +164,8 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        from execucao_unica import instancia_unica
+        with instancia_unica(BASE / 'monitor.lock'):
+            asyncio.run(main())
     except KeyboardInterrupt:
         print('Monitor encerrado.')

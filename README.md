@@ -44,7 +44,7 @@ Se já possui `.env`, preserve-o e não execute o comando de cópia sobre ele. P
 
 ## Radar direto Shopee
 
-Busca ofertas pela API sem depender dos grupos. Comece com `py radar_shopee.py --buscar "fone bluetooth"` (prévia sem publicação). Veja [filtros, simulação e execução automática](docs/radar-shopee.md). A consulta de campanhas não valida códigos de cupom.
+Busca ofertas pela API sem depender dos grupos. Comece com `py radar_shopee.py --buscar "fone bluetooth"` (prévia sem publicação). Veja [filtros, simulação e execução automática](docs/radar-shopee.md). Para o radar contínuo de 22 temas com publicação de até uma oferta a cada cinco minutos, execute `py radar_shopee_continuo.py --publicar --loop --intervalo 300 --limite 1`. Preserve `.env` e `publicacoes.sqlite3` ao atualizar o projeto. A consulta de campanhas não valida códigos de cupom.
 
 ## Shopee + Telegram
 
@@ -94,3 +94,10 @@ O arquivo `.session` permite acesso à conta Telegram. Não faça upload do paco
 ## Atualizações
 
 Depois de configurar o repositório remoto, mantenha esta estrutura de arquivos e envie apenas alterações revisadas de código e documentação. Não habilite envios de ofertas por workflows do GitHub: os testes automatizados não precisam de tokens reais.
+
+
+## Cupons e publicação integrada
+
+Consulte [INTEGRACAO.md](INTEGRACAO.md) para instalar os alertas de cupons,
+prioridade das ofertas dos grupos e radar com intervalo de 10 minutos.
+Diagnóstico sem envio: `py cupons_shopee.py --testar "URL_DO_CUPOM"`.

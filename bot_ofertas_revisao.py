@@ -10,6 +10,7 @@ import requests
 from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
+from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -27,6 +28,15 @@ def rows():
                     yield value
             except json.JSONDecodeError:
                 continue
+
+def ordered_rows():
+    # Prioridade absoluta aos grupos; preserva o ranking da fila do radar.
+    groups, radar = [], []
+    for offer in rows():
+        (radar if offer.get('source') == 'shopee_api' else groups).append(offer)
+    groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
+    yield from groups
+    yield from radar
 
 def photo_path(offer):
     value = offer.get('image')
@@ -64,6 +74,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--simular', action='store_true')
     args = parser.parse_args()
+    from contextlib import nullcontext
+    from execucao_unica import instancia_unica
+    with (nullcontext() if args.simular else instancia_unica(BASE / 'publicador.lock')):
+        run_publisher(args, parser)
+
+
+def run_publisher(args, parser):
     token, channel = os.getenv('TELEGRAM_TOKEN'), os.getenv('TELEGRAM_CANAL')
     if not args.simular and (not token or not channel):
         parser.error('Preencha TELEGRAM_TOKEN e TELEGRAM_CANAL no .env.')
@@ -72,79 +89,114 @@ def main():
     except AffiliateError as e:
         parser.error(str(e))
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
-    interval = max(5, int(os.getenv('INTERVALO_PUBLICACOES', '30')))
+    interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     announced = set()
-    retry_at = 0
+    retry_at = {}
+    prepared_coupons = {}
     print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador afiliado Shopee ativo. Ctrl+C para parar.')
     while True:
-        for offer in rows():
+        if not args.simular:
+            delay = ledger.publication_delay(clock_id=3)
+            if delay > 0:
+                time.sleep(min(delay, 1))
+                continue
+        for offer in ordered_rows():
             key = offer.get('product_id')
-            checked = product(offer.get('url', ''))
-            if not checked or checked[0] != key or checked[2] != offer['url']:
+            is_coupon = offer.get('kind') == 'coupon_alert'
+            if not isinstance(key, str):
                 continue
-            offer['store'] = checked[1]
-            if checked[1] != 'Shopee':
-                if key not in announced:
-                    print('Aguardando integração de afiliados da loja:', checked[1])
-                    announced.add(key)
-                continue
+            if not is_coupon:
+                checked = product(offer.get('url', ''))
+                if not checked or checked[0] != key or checked[2] != offer['url']:
+                    continue
+                offer['store'] = checked[1]
+                if checked[1] != 'Shopee':
+                    if key not in announced:
+                        print('Aguardando integração de afiliados da loja:', checked[1])
+                        announced.add(key)
+                    continue
             try:
                 age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
             except (KeyError, TypeError, ValueError):
                 continue
             if age < -60 or age > max_age * 60:
                 continue
-            if time.monotonic() < retry_at:
+            if time.monotonic() < retry_at.get(key, 0):
                 continue
             if args.simular and key in announced:
+                continue
+            if is_coupon:
+                raw_key = key
+                try:
+                    if raw_key not in prepared_coupons:
+                        prepared_coupons[raw_key] = prepare_alert(affiliate, offer)
+                    offer = prepared_coupons[raw_key]
+                    key = offer['product_id']
+                except AffiliateError as error:
+                    print(str(error))
+                    retry_at[raw_key] = time.monotonic() + 300
+                    continue
+                if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
+                    continue
+            origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
+            if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
                 continue
             day = None if args.simular else ledger.reserve(key)
             if not args.simular and not day:
                 continue
+            theme = offer.get('tema_radar')
             try:
-                offer = affiliate.prepare(offer)
+                if not is_coupon:
+                    offer = affiliate.prepare(offer)
+                if theme:
+                    from radar_shopee_continuo import pertence_ao_tema
+                    if not pertence_ao_tema(theme, offer):
+                        raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
             except AffiliateError as e:
                 if day:
                     ledger.release(key, day)
                 print(str(e))
-                retry_at = time.monotonic() + 300
+                retry_at[key] = time.monotonic() + 300
                 continue
-            image = offer.get('api_image') or photo_path(offer)
-            if require_photo and not image:
+            image = banner_path(BASE) if is_coupon else (offer.get('api_image') or photo_path(offer))
+            if require_photo and not image and not is_coupon:
                 if key not in announced:
                     print('Aguardando imagem autorizada:', key)
                     announced.add(key)
                 if day:
                     ledger.release(key, day)
-                retry_at = time.monotonic() + 60
+                retry_at[key] = time.monotonic() + 60
                 continue
             if args.simular:
                 if key not in announced:
-                    print('\n', key, '\n', caption(offer), '\n', offer['affiliate_url'], '\nImagem:', bool(image))
+                    preview = alert_caption(offer) if is_coupon else caption(offer)
+                    links = [e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']]
+                    print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                     announced.add(key)
                 continue
             try:
-                message_id, wait = send(token, channel, offer, image)
+                # Grava antes do envio: falha ou reinício não encurta a pausa.
+                if origin == 'radar':
+                    ledger.mark_attempt(interval, clock_id=2)
+                message_id, wait = (send_alert if is_coupon else send)(token, channel, offer, image)
             except Exception:
-                print('Envio com resultado incerto. Não repetiremos hoje:', key,
+                print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                       '(Confira o canal; detalhes sensíveis foram omitidos.)')
-                time.sleep(interval)
-                continue
+                break
             if message_id is None:
                 ledger.release(key, day)
                 print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
-                deadline = time.monotonic() + max(wait, interval)
-                while time.monotonic() < deadline:
-                    time.sleep(min(30, max(0, deadline - time.monotonic())))
-                continue
+                retry_at[key] = time.monotonic() + max(wait, 1)
+                ledger.mark_attempt(max(wait, 1), clock_id=3)
+                break
             ledger.finish(key, day, message_id)
-            print('Publicado:', key, '| mensagem', message_id)
-            time.sleep(interval)
+            print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
+            break  # Lê novamente as filas e verifica a idade após a espera.
         if args.simular:
             break
-        time.sleep(5)
+        time.sleep(1)
 
 if __name__ == '__main__':
     try:

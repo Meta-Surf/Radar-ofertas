@@ -2,6 +2,7 @@
 import html
 import re
 import sqlite3
+import time
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo
@@ -192,16 +193,63 @@ def coupon(text):
         return None
     return value
 
+def price_info(text):
+    """Extrai valor explícito e condição, sem calcular descontos ou parcelas."""
+    # Ponto separando milhares ou centavos; vírgula com dois centavos.
+    money = re.compile(r'R\s*\$\s*(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{2})?)(?![\d.,])', re.I)
+    candidates = []
+    clean_text = html.unescape(text).replace('\xa0', ' ').replace('\u200b', '')
+    previous = ''
+    for raw_line in clean_text.splitlines():
+        # Valores riscados representam geralmente o preço anterior.
+        line = re.sub(r'~~.*?~~', '', raw_line)
+        line = re.sub(r'https?://\S+', '', line)
+        line = re.sub(r'[*_`]', '', line).strip()
+        previous_line = previous
+        if line:
+            previous = line
+        for match in money.finditer(line):
+            before, after = line[:match.start()].strip(), line[match.end():].strip()
+            prefix = re.sub(r'^[^\w]+', '', before).strip()
+            if re.search(r'\d+\s*(?:x|vezes)\b', prefix, re.I):
+                continue
+            if not prefix and re.search(r'\b(?:cupom|desconto|frete|cashback|parcela)\s*[:=]?\s*$', previous_line, re.I):
+                continue
+            # Um preço final pode vir após "De R$ ... por R$ ...".
+            explicit_final = bool(re.search(r'\bpor\s*[:=\-]?\s*$', prefix, re.I))
+            if explicit_final:
+                # "Frete por", "cupom por" etc. não são preço do produto.
+                if re.search(r'\b(?:frete|cupom|desconto|cashback|parcela)\b', prefix, re.I):
+                    continue
+            elif not re.fullmatch(r'(?:(?:preço|valor)(?:\s+(?:final|promocional))?|agora|apenas|s[oó]|somente|a partir de)?\s*[:=\-]?\s*', prefix, re.I):
+                continue
+            # Exclui valor do desconto, limiar de cupom e mensalidade.
+            if re.match(r'(?:OFF\b|de\s+(?:desconto|cashback)\b|/\s*m[eê]s|por\s+m[eê]s|cada\s+parcela)', after, re.I):
+                continue
+            if re.search(r'\b(?:cupom|cupons|desconto)\b', line, re.I) and re.match(r'(?:em|acima|nas compras)\b', after, re.I):
+                continue
+            if after and not re.match(r'(?:no\s+(?:app|aplicativo|pix|boleto|cart[aã]o)|via\s+pix|[àa]\s+vista|com\s+(?:o\s+)?cupom|usando\s+(?:o\s+)?cupom|aplicando\s+(?:o\s+)?cupom|em\s+at[eé]|no\s+pagamento|[!✅🔥💰💵💸🎉])', after, re.I):
+                continue
+            value = match[1]
+            if ',' in value:
+                whole, cents = value.replace('.', '').split(',')
+            elif re.fullmatch(r'\d+\.\d{2}', value):
+                whole, cents = value.split('.')
+            else:
+                whole, cents = value.replace('.', ''), '00'
+            if int(whole) == 0 and int(cents) == 0:
+                continue
+            formatted = f'{int(whole):,}'.replace(',', '.') + ',' + cents
+            condition = after.strip(' !✅🔥💰💵💸🎉')
+            candidates.append({'price': formatted, 'price_condition': condition,
+                               'price_from': bool(re.search(r'\ba partir de\b', prefix, re.I))})
+    # Nunca escolhe o menor de dois preços/modos de pagamento sem contexto.
+    identities = {(c['price'], c['price_condition'], c['price_from']) for c in candidates}
+    return candidates[0] if len(identities) == 1 else None
+
 def price(text):
-    amount = r'(\d+(?:\.\d{3})*(?:,\d{2})?)(?![\d.,])'
-    def formatted(value):
-        whole, _, cents = value.replace('.', '').partition(',')
-        return f'{int(whole):,}'.replace(',', '.') + ',' + (cents or '00')
-    m = re.search(r'\bpor\s*:?\s*R\$\s*' + amount, text, re.I)
-    if m:
-        return formatted(m[1])
-    values = re.findall(r'^\s*(?:💰|✅|preço\s*:)?\s*R\$\s*' + amount + r'\s*$', text, re.I | re.M)
-    return formatted(values[0]) if len(values) == 1 else None
+    info = price_info(text)
+    return info['price'] if info else None
 
 def caption(offer):
     # Texto enxuto; não acrescenta características ou condições não confirmadas.
@@ -213,7 +261,14 @@ def caption(offer):
         parts.append('<b>' + html.escape(name) + '</b>')
     if offer.get('price'):
         prefix = 'a partir de ' if offer.get('price_from') else ''
-        parts.append('💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>')
+        price_line = '💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>'
+        if offer.get('source') == 'shopee_api':
+            price_line += ' (antes de cupons e descontos de pagamento)'
+        elif offer.get('price_condition'):
+            price_line += ' — ' + html.escape(str(offer['price_condition']))
+        parts.append(price_line)
+        if offer.get('source') == 'shopee_api':
+            parts.append('🎟️ Confira cupons e possíveis descontos no Pix na página do produto.')
     if offer.get('coupon'):
         parts.append('🎟️ Cupom: <code>' + html.escape(offer['coupon']) + '</code>'
                      + '\nConfira as condições do cupom na loja.')
@@ -227,12 +282,32 @@ class Ledger:
         self.db = sqlite3.connect(path, timeout=30)
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS posts (product TEXT, day TEXT, status TEXT, message_id INTEGER, PRIMARY KEY(product, day))')
+        self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
         self.db.commit()
+
+    def publication_delay(self, clock_id=1):
+        row = self.db.execute('SELECT next_at FROM publication_clock WHERE id=?', (clock_id,)).fetchone()
+        return max(0, row[0] - time.time()) if row else 0
+
+    def mark_attempt(self, interval, clock_id=1):
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (?, ?)', (clock_id, time.time() + interval))
 
     def reserve(self, product_id, moment=None):
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
-        with self.db:
+        # Serializa a verificação e a reserva entre processos concorrentes.
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            # O produto é identificado pelo par loja/item. Publicações anteriores
+            # continuam bloqueadas depois da virada do dia e de reinícios.
+            if self.db.execute('SELECT 1 FROM posts WHERE product=? LIMIT 1', (product_id,)).fetchone():
+                self.db.commit()
+                return None
             result = self.db.execute('INSERT OR IGNORE INTO posts VALUES (?, ?, ?, NULL)', (product_id, day, 'sending'))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
         return day if result.rowcount else None
 
     def finish(self, product_id, day, message_id):

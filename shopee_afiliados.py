@@ -92,6 +92,19 @@ class ShopeeAffiliate:
             raise AffiliateError('A Shopee não devolveu um link de afiliado válido; publicação bloqueada.')
         return link
 
+    def generate_coupon_link(self, destination):
+        from cupons_shopee import canonical_destination
+        clean = canonical_destination(destination)
+        if not clean or product(clean):
+            raise AffiliateError('É necessário um destino Shopee de cupons reconhecido.')
+        origin, sub = json.dumps(clean), json.dumps(self.sub_id)
+        data = self.request(f'mutation {{ generateShortLink(input: {{originUrl: {origin}, subIds: [{sub}]}}) {{ shortLink }} }}')
+        result = data.get('generateShortLink') or {}
+        link = result.get('shortLink') if isinstance(result, dict) else None
+        if not valid_affiliate_url(link) or link == clean:
+            raise AffiliateError('Cupom bloqueado: a API não devolveu um novo link de afiliado válido.')
+        return link
+
     def details(self, key):
         _, shop, item = key.split(':')
         if not shop.isdigit() or not item.isdigit():

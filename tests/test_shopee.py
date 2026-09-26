@@ -80,6 +80,7 @@ class AffiliateTests(unittest.TestCase):
         p=self.publisher()
         offer={'url':URL,'product_id':'Shopee:123:456','source_date':datetime.now(timezone.utc).isoformat()}
         ledger=Mock(); ledger.reserve.return_value='2026-09-25'
+        ledger.publication_delay.return_value = 0
         client=Mock(); client.prepare.side_effect=AffiliateError('API recusada')
         with patch.dict(os.environ,{'TELEGRAM_TOKEN':'fake','TELEGRAM_CANAL':'@teste'}), patch.object(sys,'argv',['bot.py']), patch.object(p,'rows',return_value=iter([offer])), patch.object(p,'Ledger',return_value=ledger), patch.object(p.ShopeeAffiliate,'from_env',return_value=client), patch.object(p,'send') as send, patch.object(p.time,'sleep',side_effect=KeyboardInterrupt), redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
