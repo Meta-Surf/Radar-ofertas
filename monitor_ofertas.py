@@ -108,6 +108,8 @@ async def main():
                     print('Ignorada: não foi possível resolver o link do produto.', chat_id, messages[0].id)
                 return
             key, store, direct_url = next(iter(products.values()))
+            if store != 'Shopee':
+                return
             image = None
             if str(chat_id) in allowed_media:
                 photo = next((m for m in messages if m.photo), None)
@@ -121,7 +123,7 @@ async def main():
                             target.unlink()
                     except Exception:
                         logging.warning('Imagem indisponível na mensagem %s.', photo.id)
-            row = {'product_id': key, 'store': store, 'url': direct_url,
+            row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
                    'price': price(text), 'coupon': coupon(text), 'image': image,
                    'chat_id': chat_id, 'message_id': messages[0].id,
                    'captured_at': datetime.now(timezone.utc).isoformat(),
@@ -146,6 +148,8 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        from execucao_unica import instancia_unica
+        with instancia_unica(BASE / 'monitor.lock'):
+            asyncio.run(main())
     except KeyboardInterrupt:
         print('Monitor encerrado.')
