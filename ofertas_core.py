@@ -213,7 +213,12 @@ def caption(offer):
         parts.append('<b>' + html.escape(name) + '</b>')
     if offer.get('price'):
         prefix = 'a partir de ' if offer.get('price_from') else ''
-        parts.append('💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>')
+        price_line = '💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>'
+        if offer.get('source') == 'shopee_api':
+            price_line += ' (antes de cupons e descontos de pagamento)'
+        parts.append(price_line)
+        if offer.get('source') == 'shopee_api':
+            parts.append('🎟️ Confira cupons e possíveis descontos no Pix na página do produto.')
     if offer.get('coupon'):
         parts.append('🎟️ Cupom: <code>' + html.escape(offer['coupon']) + '</code>'
                      + '\nConfira as condições do cupom na loja.')
@@ -231,8 +236,19 @@ class Ledger:
 
     def reserve(self, product_id, moment=None):
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
-        with self.db:
+        # Serializa a verificação e a reserva entre processos concorrentes.
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            # O produto é identificado pelo par loja/item. Publicações anteriores
+            # continuam bloqueadas depois da virada do dia e de reinícios.
+            if self.db.execute('SELECT 1 FROM posts WHERE product=? LIMIT 1', (product_id,)).fetchone():
+                self.db.commit()
+                return None
             result = self.db.execute('INSERT OR IGNORE INTO posts VALUES (?, ?, ?, NULL)', (product_id, day, 'sending'))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
         return day if result.rowcount else None
 
     def finish(self, product_id, day, message_id):
