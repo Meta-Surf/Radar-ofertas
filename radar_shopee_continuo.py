@@ -161,7 +161,7 @@ def run_round(args, parser):
         parser.exit(1, 'Faltam TELEGRAM_TOKEN/TELEGRAM_CANAL no .env local.\n')
     try:
         client = ShopeeAffiliate.from_env()
-        interval = max(300, int(os.getenv('INTERVALO_PUBLICACOES', '300')))
+        interval = 600
     except Exception:
         parser.exit(1, 'Confira SHOPEE_APP_ID, SHOPEE_SECRET e INTERVALO_PUBLICACOES no .env.\n')
     if args.enfileirar:
@@ -252,13 +252,13 @@ def main():
     parser.add_argument('--publicar', action='store_true', help='Envia ao TELEGRAM_CANAL configurado no .env.')
     parser.add_argument('--enfileirar', action='store_true', help='Entrega ofertas ao publicador unificado, sem envio direto.')
     parser.add_argument('--loop', action='store_true', help='Mantém a consulta e publicação periódicas até Ctrl+C.')
-    parser.add_argument('--intervalo', type=int, default=300, help='Segundos entre rodadas; padrão 300 (5 min).')
+    parser.add_argument('--intervalo', type=int, default=600, help='Segundos entre rodadas; padrão 600 (10 min).')
     parser.add_argument('--limite', type=int, default=1, choices=range(1, 4), help='Máximo por rodada; padrão 1.')
     args = parser.parse_args()
     if args.publicar and args.enfileirar:
         parser.error('Escolha --publicar OU --enfileirar.')
-    if args.intervalo < 300:
-        parser.error('--intervalo deve ser pelo menos 300 segundos.')
+    if args.intervalo < 600:
+        parser.error('--intervalo deve ser pelo menos 600 segundos.')
     from execucao_unica import instancia_unica
     from contextlib import ExitStack
     with ExitStack() as stack:
