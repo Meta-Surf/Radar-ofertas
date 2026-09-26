@@ -104,8 +104,13 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             l=Ledger(Path(d)/'ledger.db')
             self.assertEqual(l.reserve('x',datetime(2026,9,24,2,59,tzinfo=timezone.utc)),'2026-09-23')
-            self.assertEqual(l.reserve('x',datetime(2026,9,24,3,1,tzinfo=timezone.utc)),'2026-09-24')
+            self.assertIsNone(l.reserve('x',datetime(2026,9,24,3,1,tzinfo=timezone.utc)))
             l.db.close()
+    def test_shopee_price_explains_checkout_discounts(self):
+        text = caption({'store':'Shopee','source':'shopee_api','price':'879,99'})
+        self.assertIn('antes de cupons e descontos de pagamento', text)
+        self.assertIn('possíveis descontos no Pix', text)
+        self.assertNotIn('713,00', text)
     def test_rejection_and_success(self):
         with tempfile.TemporaryDirectory() as d:
             l=Ledger(Path(d)/'ledger.db')
