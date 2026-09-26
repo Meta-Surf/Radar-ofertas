@@ -28,6 +28,20 @@ def rows():
             except json.JSONDecodeError:
                 continue
 
+def ordered_rows(preferred):
+    # As ofertas mais recentes de grupos vêm primeiro. Alterna as origens,
+    # preservando o ranking da fila do radar e evitando fome de uma fonte.
+    groups, radar = [], []
+    for offer in rows():
+        (radar if offer.get('source') == 'shopee_api' else groups).append(offer)
+    groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
+    first, second = (groups, radar) if preferred == 'telegram' else (radar, groups)
+    for i in range(max(len(first), len(second))):
+        if i < len(first):
+            yield first[i]
+        if i < len(second):
+            yield second[i]
+
 def photo_path(offer):
     value = offer.get('image')
     if not value:
@@ -64,6 +78,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--simular', action='store_true')
     args = parser.parse_args()
+    from contextlib import nullcontext
+    from execucao_unica import instancia_unica
+    with (nullcontext() if args.simular else instancia_unica(BASE / 'publicador.lock')):
+        run_publisher(args, parser)
+
+
+def run_publisher(args, parser):
     token, channel = os.getenv('TELEGRAM_TOKEN'), os.getenv('TELEGRAM_CANAL')
     if not args.simular and (not token or not channel):
         parser.error('Preencha TELEGRAM_TOKEN e TELEGRAM_CANAL no .env.')
@@ -72,14 +93,15 @@ def main():
     except AffiliateError as e:
         parser.error(str(e))
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
-    interval = max(5, int(os.getenv('INTERVALO_PUBLICACOES', '30')))
+    interval = max(300, int(os.getenv('INTERVALO_PUBLICACOES', '300')))
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     announced = set()
-    retry_at = 0
+    retry_at = {}
+    preferred = 'telegram'
     print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador afiliado Shopee ativo. Ctrl+C para parar.')
     while True:
-        for offer in rows():
+        for offer in ordered_rows(preferred):
             key = offer.get('product_id')
             checked = product(offer.get('url', ''))
             if not checked or checked[0] != key or checked[2] != offer['url']:
@@ -96,20 +118,26 @@ def main():
                 continue
             if age < -60 or age > max_age * 60:
                 continue
-            if time.monotonic() < retry_at:
+            if time.monotonic() < retry_at.get(key, 0):
                 continue
             if args.simular and key in announced:
                 continue
             day = None if args.simular else ledger.reserve(key)
             if not args.simular and not day:
                 continue
+            theme = offer.get('tema_radar')
+            origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
             try:
                 offer = affiliate.prepare(offer)
+                if theme:
+                    from radar_shopee_continuo import pertence_ao_tema
+                    if not pertence_ao_tema(theme, offer):
+                        raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
             except AffiliateError as e:
                 if day:
                     ledger.release(key, day)
                 print(str(e))
-                retry_at = time.monotonic() + 300
+                retry_at[key] = time.monotonic() + 300
                 continue
             image = offer.get('api_image') or photo_path(offer)
             if require_photo and not image:
@@ -118,7 +146,7 @@ def main():
                     announced.add(key)
                 if day:
                     ledger.release(key, day)
-                retry_at = time.monotonic() + 60
+                retry_at[key] = time.monotonic() + 60
                 continue
             if args.simular:
                 if key not in announced:
@@ -126,22 +154,31 @@ def main():
                     announced.add(key)
                 continue
             try:
+                delay = ledger.publication_delay()
+                if delay > 0:
+                    ledger.release(key, day)
+                    time.sleep(min(delay, 30))
+                    break
+                # Grava antes do envio: falha ou reinício não encurta a pausa.
+                ledger.mark_attempt(interval)
                 message_id, wait = send(token, channel, offer, image)
             except Exception:
-                print('Envio com resultado incerto. Não repetiremos hoje:', key,
+                print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                       '(Confira o canal; detalhes sensíveis foram omitidos.)')
                 time.sleep(interval)
-                continue
+                break
             if message_id is None:
                 ledger.release(key, day)
                 print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
                 deadline = time.monotonic() + max(wait, interval)
                 while time.monotonic() < deadline:
                     time.sleep(min(30, max(0, deadline - time.monotonic())))
-                continue
+                break
             ledger.finish(key, day, message_id)
-            print('Publicado:', key, '| mensagem', message_id)
+            print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
+            preferred = 'radar' if origin == 'telegram' else 'telegram'
             time.sleep(interval)
+            break  # Lê novamente as filas e verifica a idade após a espera.
         if args.simular:
             break
         time.sleep(5)
