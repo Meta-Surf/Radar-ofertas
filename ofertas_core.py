@@ -2,6 +2,7 @@
 import html
 import re
 import sqlite3
+import time
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo
@@ -232,7 +233,16 @@ class Ledger:
         self.db = sqlite3.connect(path, timeout=30)
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS posts (product TEXT, day TEXT, status TEXT, message_id INTEGER, PRIMARY KEY(product, day))')
+        self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
         self.db.commit()
+
+    def publication_delay(self):
+        row = self.db.execute('SELECT next_at FROM publication_clock WHERE id=1').fetchone()
+        return max(0, row[0] - time.time()) if row else 0
+
+    def mark_attempt(self, interval):
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (1, ?)', (time.time() + interval,))
 
     def reserve(self, product_id, moment=None):
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
