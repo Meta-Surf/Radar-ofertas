@@ -236,13 +236,13 @@ class Ledger:
         self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
         self.db.commit()
 
-    def publication_delay(self):
-        row = self.db.execute('SELECT next_at FROM publication_clock WHERE id=1').fetchone()
+    def publication_delay(self, clock_id=1):
+        row = self.db.execute('SELECT next_at FROM publication_clock WHERE id=?', (clock_id,)).fetchone()
         return max(0, row[0] - time.time()) if row else 0
 
-    def mark_attempt(self, interval):
+    def mark_attempt(self, interval, clock_id=1):
         with self.db:
-            self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (1, ?)', (time.time() + interval,))
+            self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (?, ?)', (clock_id, time.time() + interval))
 
     def reserve(self, product_id, moment=None):
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
