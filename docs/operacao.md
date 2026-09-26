@@ -42,8 +42,8 @@ Pode substituir pelo link direto de outro produto Shopee. O comando imprime some
 - Inclui o nome do produto quando retornado pela API. Preserva o preço e o código de cupom identificados na origem, explicitamente rotulados como informação da origem; não garante validade do cupom ou consulta preço/estoque em tempo real.
 - Não copia o link de uma página de cupons que pertence a outro afiliado. Um código de cupom só é incluído se estiver escrito de forma reconhecível na mensagem.
 - INTERVALO_PUBLICACOES padrão 30 segundos; IDADE_MAXIMA_MINUTOS padrão 120 minutos desde a mensagem de origem.
-- publicacoes.sqlite3 impede repetir o mesmo ID de produto no mesmo dia em America/Sao_Paulo, inclusive entre grupos e depois de reiniciar. Produtos já publicados hoje pela versão antiga também ficam bloqueados: não apague o banco para forçar republicação.
-- Falha ao gerar o link libera a reserva porque nada foi enviado e aplica uma pausa de cinco minutos antes de novas tentativas. Se a resposta do Telegram for incerta (timeout/queda), mantém a reserva por aquele dia para evitar duplicidade. Consulte o canal nesses casos.
+- publicacoes.sqlite3 impede repetir o mesmo ID de loja e produto em qualquer data, inclusive entre grupos e depois de reiniciar. Preserve o banco ao atualizar o código; não o apague para forçar republicação.
+- Falha ao gerar o link libera a reserva porque nada foi enviado e aplica uma pausa de cinco minutos antes de novas tentativas. Se a resposta do Telegram for incerta (timeout/queda), mantém a reserva para evitar duplicidade mesmo após a virada do dia. Consulte o canal nesses casos.
 - Anúncios diferentes de um mesmo produto podem ter IDs distintos; não existe deduplicação visual ou por descrição.
 - Não execute monitores simultâneos com a mesma sessão. Não use o banco simultaneamente via OneDrive em computadores diferentes. A fila, o banco e as imagens são locais e ocupam espaço; não há exclusão automática.
 
@@ -59,7 +59,7 @@ O teste de geração de links deve receber um produto Shopee. Se ocorrer falha d
 
 ## Validação técnica e fontes
 
-Foram executados 33 testes locais com chamadas externas simuladas, cobrindo reconhecimento de links, duplicatas, assinatura dos bytes enviados, erro de autenticação, ausência de credenciais, rejeição de link inválido, botão com link afiliado e ausência de envio ao Telegram quando a API falha. Não houve uso de suas credenciais nem publicação real durante o desenvolvimento.
+Os testes locais com chamadas externas simuladas, cobrindo reconhecimento de links, duplicatas, assinatura dos bytes enviados, erro de autenticação, ausência de credenciais, rejeição de link inválido, botão com link afiliado e ausência de envio ao Telegram quando a API falha. Não houve uso de suas credenciais nem publicação real durante o desenvolvimento.
 
 Execute `py -m unittest discover -v` para repetir os testes. Eles não usam suas credenciais reais.
 
