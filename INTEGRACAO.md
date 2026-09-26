@@ -1,5 +1,21 @@
 # Cupons + grupos + radar Shopee
 
+## Correção de preços captados nos grupos
+
+O monitor reconhece valores como `💵 R$ 2391 no app`, `R$ 2.391,90 no Pix`,
+`Preço: R$ 2391` e `De R$ 3000 por R$ 2391`. Preserva a condição junto ao
+preço, incluindo `no app`, `à vista` e cupom indicado na mesma linha.
+Não calcula preços a partir de parcelas ou descontos, nem escolhe entre
+vários valores ambíguos. O preço continua sendo o informado no grupo;
+não é uma verificação do checkout. O console agora mostra o preço captado.
+
+Para aplicar esta correção, pare os processos antigos, substitua
+`ofertas_core.py` e `monitor_ofertas.py` pelos arquivos atualizados e reinicie
+`INICIAR_INTEGRADO.bat`. Preserve `.env`, a sessão e o banco existentes.
+A correção vale para novas capturas: registros antigos já gravados sem preço
+não contêm o texto original necessário para recuperá-lo, e mensagens já
+publicadas no canal não são editadas automaticamente.
+
 ## Alertas de cupons
 
 O monitor captura também mensagens novas cujo título indica cupom/cupons e
