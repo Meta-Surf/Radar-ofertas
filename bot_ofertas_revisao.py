@@ -28,19 +28,14 @@ def rows():
             except json.JSONDecodeError:
                 continue
 
-def ordered_rows(preferred):
-    # As ofertas mais recentes de grupos vêm primeiro. Alterna as origens,
-    # preservando o ranking da fila do radar e evitando fome de uma fonte.
+def ordered_rows():
+    # Prioridade absoluta aos grupos; preserva o ranking da fila do radar.
     groups, radar = [], []
     for offer in rows():
         (radar if offer.get('source') == 'shopee_api' else groups).append(offer)
     groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
-    first, second = (groups, radar) if preferred == 'telegram' else (radar, groups)
-    for i in range(max(len(first), len(second))):
-        if i < len(first):
-            yield first[i]
-        if i < len(second):
-            yield second[i]
+    yield from groups
+    yield from radar
 
 def photo_path(offer):
     value = offer.get('image')
@@ -93,15 +88,19 @@ def run_publisher(args, parser):
     except AffiliateError as e:
         parser.error(str(e))
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
-    interval = max(300, int(os.getenv('INTERVALO_PUBLICACOES', '300')))
+    interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     announced = set()
     retry_at = {}
-    preferred = 'telegram'
     print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador afiliado Shopee ativo. Ctrl+C para parar.')
     while True:
-        for offer in ordered_rows(preferred):
+        if not args.simular:
+            delay = ledger.publication_delay(clock_id=3)
+            if delay > 0:
+                time.sleep(min(delay, 1))
+                continue
+        for offer in ordered_rows():
             key = offer.get('product_id')
             checked = product(offer.get('url', ''))
             if not checked or checked[0] != key or checked[2] != offer['url']:
@@ -122,11 +121,13 @@ def run_publisher(args, parser):
                 continue
             if args.simular and key in announced:
                 continue
+            origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
+            if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
+                continue
             day = None if args.simular else ledger.reserve(key)
             if not args.simular and not day:
                 continue
             theme = offer.get('tema_radar')
-            origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
             try:
                 offer = affiliate.prepare(offer)
                 if theme:
@@ -154,34 +155,26 @@ def run_publisher(args, parser):
                     announced.add(key)
                 continue
             try:
-                delay = ledger.publication_delay()
-                if delay > 0:
-                    ledger.release(key, day)
-                    time.sleep(min(delay, 30))
-                    break
                 # Grava antes do envio: falha ou reinício não encurta a pausa.
-                ledger.mark_attempt(interval)
+                if origin == 'radar':
+                    ledger.mark_attempt(interval, clock_id=2)
                 message_id, wait = send(token, channel, offer, image)
             except Exception:
                 print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                       '(Confira o canal; detalhes sensíveis foram omitidos.)')
-                time.sleep(interval)
                 break
             if message_id is None:
                 ledger.release(key, day)
                 print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
-                deadline = time.monotonic() + max(wait, interval)
-                while time.monotonic() < deadline:
-                    time.sleep(min(30, max(0, deadline - time.monotonic())))
+                retry_at[key] = time.monotonic() + max(wait, 1)
+                ledger.mark_attempt(max(wait, 1), clock_id=3)
                 break
             ledger.finish(key, day, message_id)
             print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
-            preferred = 'radar' if origin == 'telegram' else 'telegram'
-            time.sleep(interval)
             break  # Lê novamente as filas e verifica a idade após a espera.
         if args.simular:
             break
-        time.sleep(5)
+        time.sleep(1)
 
 if __name__ == '__main__':
     try:
