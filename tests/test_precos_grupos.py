@@ -19,7 +19,7 @@ class GroupPriceTests(unittest.TestCase):
         with patch.object(client, 'generate_link', return_value='https://s.shopee.com.br/novo'), \
              patch.object(client, 'details', return_value={'productName': 'Zotac RTX 5060'}):
             rendered = caption(client.prepare(offer))
-        self.assertIn('R$ 2.391,00</b> — no app', rendered)
+        self.assertIn('R$ 2.391,00</b>\n\nno app', rendered)
         self.assertNotIn('WhatsApp', rendered)
 
     def test_common_formats(self):

@@ -108,7 +108,7 @@ class Tests(unittest.TestCase):
             l.db.close()
     def test_shopee_price_explains_checkout_discounts(self):
         text = caption({'store':'Shopee','source':'shopee_api','price':'879,99'})
-        self.assertIn('antes de cupons e descontos de pagamento', text)
+        self.assertIn('Antes de cupons e descontos de pagamento', text)
         self.assertIn('possíveis descontos no Pix', text)
         self.assertNotIn('713,00', text)
     def test_rejection_and_success(self):
@@ -122,3 +122,4 @@ class Tests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

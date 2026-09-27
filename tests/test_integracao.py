@@ -15,7 +15,7 @@ class IntegrationTests(unittest.TestCase):
     def test_radar_wait_does_not_delay_groups_or_reset_on_group_send(self):
         def offer(item, source):
             return dict(product_id=f'Shopee:1:{item}', url=f'https://shopee.com.br/product/1/{item}',
-                        source=source, source_date=datetime.now(timezone.utc).isoformat(),
+                        source=source, price='100,00', source_date=datetime.now(timezone.utc).isoformat(),
                         api_image='https://x.susercontent.com/a.jpg')
         g1, g2 = offer(1, 'telegram'), offer(2, 'telegram')
         r1, r2 = offer(3, 'shopee_api'), offer(4, 'shopee_api')

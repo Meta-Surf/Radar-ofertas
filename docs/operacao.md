@@ -66,3 +66,15 @@ Execute `py -m unittest discover -v` para repetir os testes. Eles não usam suas
 A autenticação e o esquema generateShortLink(input: ShortLinkInput), originUrl, subIds e shortLink foram conferidos no HTML e no esquema incorporado dos exploradores oficiais em 25/09/2026:
 - https://open-api.affiliate.shopee.com.br/explorer
 - https://open-api.affiliate.shopee.com.br/explorer/v2
+
+
+## Correção de preços e mensagens editadas — 27/09/2026
+
+O monitor captura mensagens novas, álbuns e edições nos chats configurados. O publicador usa a última captura de cada mensagem e aguarda preço explícito válido antes de reservar ou enviar uma oferta. Alertas de cupons continuam independentes desse requisito. O preço fica em negrito, com condições em uma linha separada. Não há cálculo de descontos nem uso do preço da API como substituto do preço ausente no grupo.
+
+Atualize juntos `monitor_ofertas.py`, `bot_ofertas_revisao.py` e `ofertas_core.py`. Preserve `.env`, sessão, bancos, imagens e filas. Reinicie o monitor e o publicador uma única vez para carregar o código; alterar os arquivos não atualiza processos Python já iniciados. Não inicie uma segunda instância em paralelo. O radar mantém seu intervalo de 600 segundos.
+
+A correção vale para capturas futuras e registros ainda não publicados. Não edita retroativamente posts já enviados nem apaga o histórico para republicá-los. Mensagens antigas continuam sujeitas ao limite de idade configurado. A captura de edições só ocorre enquanto o monitor está conectado.
+
+Validação: 79 testes locais, com APIs simuladas e sem publicação real. O exemplo `Por: R$ 2.713,08 no pix` mantém o valor e a condição.
+

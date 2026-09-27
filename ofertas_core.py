@@ -262,11 +262,11 @@ def caption(offer):
     if offer.get('price'):
         prefix = 'a partir de ' if offer.get('price_from') else ''
         price_line = '💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>'
-        if offer.get('source') == 'shopee_api':
-            price_line += ' (antes de cupons e descontos de pagamento)'
-        elif offer.get('price_condition'):
-            price_line += ' — ' + html.escape(str(offer['price_condition']))
         parts.append(price_line)
+        if offer.get('source') == 'shopee_api':
+            parts.append('Antes de cupons e descontos de pagamento.')
+        elif offer.get('price_condition'):
+            parts.append(html.escape(str(offer['price_condition'])))
         if offer.get('source') == 'shopee_api':
             parts.append('🎟️ Confira cupons e possíveis descontos no Pix na página do produto.')
     if offer.get('coupon'):

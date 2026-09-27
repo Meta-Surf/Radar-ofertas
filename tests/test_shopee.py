@@ -66,7 +66,7 @@ class AffiliateTests(unittest.TestCase):
     def test_send_button_has_returned_link(self):
         p=self.publisher()
         p.requests.post.return_value.json.return_value={'ok':True,'result':{'message_id':12}}
-        offer={'store':'Shopee','affiliate_url':LINK,'affiliate_generated':True}
+        offer={'price':'100,00','store':'Shopee','affiliate_url':LINK,'affiliate_generated':True}
         p.send('FAKE_TOKEN','@teste',offer,None)
         data=p.requests.post.call_args.kwargs['data']
         self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'][0][0]['url'],LINK)
@@ -78,7 +78,7 @@ class AffiliateTests(unittest.TestCase):
         p.requests.post.assert_not_called()
     def test_api_failure_releases_reservation_and_no_send(self):
         p=self.publisher()
-        offer={'url':URL,'product_id':'Shopee:123:456','source_date':datetime.now(timezone.utc).isoformat()}
+        offer={'price':'100,00','url':URL,'product_id':'Shopee:123:456','source_date':datetime.now(timezone.utc).isoformat()}
         ledger=Mock(); ledger.reserve.return_value='2026-09-25'
         ledger.publication_delay.return_value = 0
         client=Mock(); client.prepare.side_effect=AffiliateError('API recusada')
@@ -90,3 +90,4 @@ class AffiliateTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

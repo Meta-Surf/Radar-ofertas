@@ -8,7 +8,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from ofertas_core import Ledger, caption, product
+from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 
@@ -31,9 +31,17 @@ def rows():
 
 def ordered_rows():
     # Prioridade absoluta aos grupos; preserva o ranking da fila do radar.
-    groups, radar = [], []
+    groups, radar, latest = [], [], {}
     for offer in rows():
-        (radar if offer.get('source') == 'shopee_api' else groups).append(offer)
+        if offer.get('source') == 'shopee_api':
+            radar.append(offer)
+        elif offer.get('kind') != 'coupon_alert' and offer.get('chat_id') is not None and offer.get('message_id') is not None:
+            # A fila é append-only: a última captura substitui a versão anterior,
+            # inclusive quando a edição remove o preço.
+            latest[(offer['chat_id'], offer['message_id'])] = offer
+        else:
+            groups.append(offer)
+    groups.extend(latest.values())
     groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
     yield from groups
     yield from radar
@@ -48,6 +56,8 @@ def photo_path(offer):
     return path if 0 < path.stat().st_size <= 10_000_000 else None
 
 def send(token, channel, offer, image):
+    if not valid_price(offer):
+        raise AffiliateError('Publicação bloqueada: preço ausente ou inválido.')
     if not offer.get('affiliate_generated') or not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
     method = 'sendPhoto' if image else 'sendMessage'
@@ -69,6 +79,13 @@ def send(token, channel, offer, image):
     if result.get('ok') is False:
         return None, int(result.get('parameters', {}).get('retry_after', 60))
     return int(result['result']['message_id']), 0
+
+def valid_price(offer):
+    value = offer.get('price')
+    if not isinstance(value, str):
+        return False
+    info = price_info('R$ ' + value)
+    return bool(info and info['price'] == value and not info['price_condition'])
 
 def main():
     parser = argparse.ArgumentParser()
@@ -123,6 +140,12 @@ def run_publisher(args, parser):
                 continue
             if age < -60 or age > max_age * 60:
                 continue
+            if not is_coupon and not valid_price(offer):
+                marker = ('sem_preco', key)
+                if marker not in announced:
+                    print('Aguardando preço explícito ou edição na origem:', key)
+                    announced.add(marker)
+                continue
             if time.monotonic() < retry_at.get(key, 0):
                 continue
             if args.simular and key in announced:
@@ -150,6 +173,8 @@ def run_publisher(args, parser):
             try:
                 if not is_coupon:
                     offer = affiliate.prepare(offer)
+                    if not valid_price(offer):
+                        raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
                 if theme:
                     from radar_shopee_continuo import pertence_ao_tema
                     if not pertence_ao_tema(theme, offer):
