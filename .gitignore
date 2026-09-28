@@ -41,3 +41,5 @@ venv/
 
 # Destinos informados localmente para redirecionadores
 destinos_confirmados.json
+
+/assets/banner_cupons_ml.png
