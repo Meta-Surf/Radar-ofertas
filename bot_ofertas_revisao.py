@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
+import cupons_mercadolivre as ml_coupons
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -109,7 +110,8 @@ def run_publisher(args, parser):
     try:
         affiliate = ShopeeAffiliate.from_env()
     except AffiliateError as e:
-        parser.error(str(e))
+        affiliate = None
+        print("Shopee indisponível:", str(e), "| Cupons Mercado Livre continuam habilitados.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
@@ -119,7 +121,7 @@ def run_publisher(args, parser):
     announced = set()
     retry_at = {}
     prepared_coupons = {}
-    print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador afiliado Shopee ativo. Ctrl+C para parar.')
+    print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee e listas de cupons. Ctrl+C para parar.')
     while True:
         if not args.simular:
             delay = ledger.publication_delay(clock_id=3)
@@ -129,6 +131,9 @@ def run_publisher(args, parser):
         for offer in ordered_rows(intelligence, channel):
             key = offer.get('product_id')
             is_coupon = offer.get('kind') == 'coupon_alert'
+            is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
+            if affiliate is None and not is_ml_coupon:
+                continue
             if not isinstance(key, str):
                 continue
             if not is_coupon:
@@ -161,7 +166,7 @@ def run_publisher(args, parser):
                 raw_key = key
                 try:
                     if raw_key not in prepared_coupons:
-                        prepared_coupons[raw_key] = prepare_alert(affiliate, offer)
+                        prepared_coupons[raw_key] = (ml_coupons.prepare_alert(offer) if is_ml_coupon else prepare_alert(affiliate, offer))
                     offer = prepared_coupons[raw_key]
                     key = offer['product_id']
                 except AffiliateError as error:
@@ -203,7 +208,7 @@ def run_publisher(args, parser):
             day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
             if not args.simular and not day:
                 continue
-            image = banner_path(BASE) if is_coupon else (offer.get('api_image') or photo_path(offer))
+            image = (ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon else (offer.get('api_image') or photo_path(offer))
             if require_photo and not image and not is_coupon:
                 if key not in announced:
                     print('Aguardando imagem autorizada:', key)
@@ -214,8 +219,8 @@ def run_publisher(args, parser):
                 continue
             if args.simular:
                 if key not in announced:
-                    preview = alert_caption(offer) if is_coupon else caption(offer)
-                    links = [e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']]
+                    preview = (ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon else caption(offer)
+                    links = [] if is_ml_coupon else ([e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']])
                     print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                     announced.add(key)
                 continue
@@ -223,7 +228,7 @@ def run_publisher(args, parser):
                 # Grava antes do envio: falha ou reinício não encurta a pausa.
                 if origin == 'radar':
                     ledger.mark_attempt(interval, clock_id=2)
-                message_id, wait = (send_alert if is_coupon else send)(token, channel, offer, image)
+                message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
             except Exception:
                 print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                       '(Confira o canal; detalhes sensíveis foram omitidos.)')

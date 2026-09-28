@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from ofertas_core import extract_links, resolve, price, price_info, coupon, coupon_page_links, safe_url
 from cupons_shopee import build_alerts, coupon_entries
+from cupons_mercadolivre import build_alert as build_ml_alert
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -131,6 +132,13 @@ async def main():
             print('Condição do preço:', (price_info(raw) or {}).get('price_condition') or 'ausente')
             print('Código de cupom explícito:', coupon(raw) or 'ausente')
             print('Foto nesta mensagem:', bool(message.photo), '| pertence a álbum:', bool(message.grouped_id))
+            ml_alert = build_ml_alert([message], dialog.id)
+            if ml_alert:
+                from cupons_mercadolivre import alert_caption, visible_length
+                print('Lista Mercado Livre:', len(ml_alert['entries']), 'cupons; links removidos.')
+                print('Caracteres:', visible_length(alert_caption(ml_alert)))
+                print('Diagnóstico encerrado. Nada foi publicado ou colocado na fila.')
+                return
             entries = coupon_entries([message])
             print('Links identificados para alerta de cupons:', len(entries))
             excluded = coupon_page_links(raw) | {e['url'] for e in entries}
@@ -159,6 +167,12 @@ async def main():
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
+            ml_alert = build_ml_alert(messages, chat_id)
+            if ml_alert:
+                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                    out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
+                print('Lista de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
+                return
             alerts = build_alerts(messages, chat_id)
             if alerts:
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:

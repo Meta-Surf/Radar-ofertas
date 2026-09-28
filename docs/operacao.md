@@ -80,3 +80,28 @@ Não há alteração de pixels ou dependência de download. Para restaurar manua
 
 Incluídas as correções de `**R$ 2.713,08**` e `💵2,943`, captura de edições,
 bloqueio de ofertas sem preço, valor em negrito e condições em linha separada.
+
+## Listas de cupons Mercado Livre
+
+O monitor reconhece mensagens com “Mercado Livre” e linhas de desconto terminadas
+em código após dois-pontos, como `10% OFF acima de R$ 149, limite R$ 200: HOJETEMPROMO`.
+Captura uma lista por mensagem/álbum e preserva seu texto, inclusive selecionados,
+valores mínimos, limites e outras condições. URLs, convites e botões da origem não
+são publicados. Os códigos ficam em formato copiável. Não verifica validade dos
+cupons na loja nem gera links de afiliado ML; as ofertas de produtos ML continuam
+aguardando integração própria.
+
+Não há divisão por número de cupons. O envio usa uma única foto com legenda até
+1024 unidades UTF-16 de texto visível; acima disso usa uma única mensagem de texto
+até 4096. Acima de 4096 registra o bloqueio e mantém a lista na fila, sem cortar
+condições. O limite de idade da fila continua valendo. Não envia a arte separadamente.
+Listas idênticas com mesma data local são deduplicadas independentemente do link
+removido e da ordem das linhas. Textos com condições ou redações diferentes podem
+ser tratados como novas listas.
+
+Arte: `assets/banner_cupons_ml.png`, restaurada automaticamente das partes
+versionadas quando necessário. Nenhuma nova variável no .env. Credenciais Shopee
+não são necessárias para as listas ML. TELEGRAM_TOKEN, TELEGRAM_CANAL e a
+configuração existente do monitor continuam necessários. `--diagnosticar` informa
+quantos códigos foram reconhecidos sem publicar. `--simular` mostra as listas sem
+postar; outros itens Shopee dessa mesma fila ainda podem consultar a API Shopee.
