@@ -191,9 +191,11 @@ def coupon_page_links(text):
             continue
         urls = re.findall(r'https?://[^\s<>]+', line)
         context = re.sub(r'https?://[^\s<>]+', '', line).strip()
-        if re.search(r'\b(?:link|p[aá]gina)\s+(?:do\s+)?produto\b|\bcomprar\b', context, re.I):
+        # Setas, marcadores e Markdown antes da URL não são um novo rótulo.
+        context = re.sub(r'^[^\w]+', '', context).strip()
+        if re.search(r'\b(?:link|p[aá]gina)\s+(?:do\s+)?produto\b|\b(?:comprar|compre)\b', context, re.I):
             coupon_block = False
-        elif (re.search(r'\bcupons?\b', context, re.I)
+        elif (re.search(r'\b(?:cupom|cupons)\b', context, re.I)
               and re.search(r'resgat|p[aá]gina', context, re.I)):
             coupon_block = True
         elif context and not re.search(
