@@ -153,19 +153,27 @@ def resolve(url, report=None):
     return None
 
 def coupon_page_links(text):
-    """Separa URLs rotuladas como página de cupons, sem descartar o produto."""
+    """Mantém o rótulo do cupom através de condições até o próximo link."""
     result = set()
-    previous = ''
+    coupon_block = False
     for line in text.splitlines():
         if not line.strip():
             continue
         urls = re.findall(r'https?://[^\s<>]+', line)
         context = re.sub(r'https?://[^\s<>]+', '', line).strip()
-        if not context:
-            context = previous
-        if re.search(r'\bcupons?\b', context, re.I) and re.search(r'resgat|p[aá]gina', context, re.I):
-            result.update(u.rstrip('.,;!?)\"\']') for u in urls)
-        previous = line
+        if re.search(r'\b(?:link|p[aá]gina)\s+(?:do\s+)?produto\b|\bcomprar\b', context, re.I):
+            coupon_block = False
+        elif (re.search(r'\bcupons?\b', context, re.I)
+              and re.search(r'resgat|p[aá]gina', context, re.I)):
+            coupon_block = True
+        elif context and not re.search(
+                r'R\$|\d\s*%|\b(?:OFF|selecionad\w*|categorias|acima|m[ií]nimo|v[aá]lid\w*|expira\w*|frete|primeira compra|c[oó]digo|confira|clique|aqui|link)\b',
+                context, re.I):
+            coupon_block = False
+        if urls:
+            if coupon_block:
+                result.update(u.rstrip('.,;!?)"\']') for u in urls)
+            coupon_block = False
     return result
 
 def extract_links(message):
@@ -228,7 +236,7 @@ def price_info(text):
                 continue
             if re.search(r'\b(?:cupom|cupons|desconto)\b', line, re.I) and re.match(r'(?:em|acima|nas compras)\b', after, re.I):
                 continue
-            if after and not re.match(r'(?:no\s+(?:app|aplicativo|pix|boleto|cart[aã]o)|via\s+pix|[àa]\s+vista|com\s+(?:o\s+)?cupom|usando\s+(?:o\s+)?cupom|aplicando\s+(?:o\s+)?cupom|em\s+at[eé]|no\s+pagamento|[!✅🔥💰💵💸🎉])', after, re.I):
+            if after and not re.match(r'(?:no\s+(?:app|aplicativo|pix|boleto|cart[aã]o)|via\s+pix|[àa]\s+vista|com\s+(?:o\s+)?cupom|usando\s+(?:o\s+)?cupom|aplicando\s+(?:o\s+)?cupom|em\s+(?:at[eé]\s+)?[1-9]\d?\s*(?:x\b|vezes\b|parcelas\b)(?!\s+(?:de|por)\b)|no\s+pagamento|[!✅🔥💰💵💸🎉])', after, re.I):
                 continue
             value = match[1]
             if re.fullmatch(r'\d{1,3}(?:,\d{3})+(?:\.\d{2})?', value):
