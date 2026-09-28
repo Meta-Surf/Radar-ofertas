@@ -12,6 +12,7 @@ from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
+import mercadolivre_manual as ml_manual
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -62,7 +63,9 @@ def photo_path(offer):
 def send(token, channel, offer, image):
     if not valid_price(offer):
         raise AffiliateError('Publicação bloqueada: preço ausente ou inválido.')
-    if not offer.get('affiliate_generated') or not valid_affiliate_url(offer.get('affiliate_url')):
+    if offer.get('kind') == 'ml_manual_offer':
+        offer = ml_manual.prepare(offer)
+    elif not offer.get('affiliate_generated') or not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
     if len(caption(offer).encode('utf-16-le')) // 2 > 1024:
         image = None
@@ -111,7 +114,7 @@ def run_publisher(args, parser):
         affiliate = ShopeeAffiliate.from_env()
     except AffiliateError as e:
         affiliate = None
-        print("Shopee indisponível:", str(e), "| Cupons Mercado Livre continuam habilitados.")
+        print("Shopee indisponível:", str(e), "| Entrada manual e cupons Mercado Livre continuam habilitados.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
@@ -132,11 +135,15 @@ def run_publisher(args, parser):
             key = offer.get('product_id')
             is_coupon = offer.get('kind') == 'coupon_alert'
             is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
-            if affiliate is None and not is_ml_coupon:
+            is_ml_manual = offer.get('kind') == 'ml_manual_offer'
+            if affiliate is None and not is_ml_coupon and not is_ml_manual:
                 continue
             if not isinstance(key, str):
                 continue
-            if not is_coupon:
+            if is_ml_manual:
+                if not ml_manual.trusted(offer.get('chat_id')):
+                    continue
+            elif not is_coupon:
                 checked = product(offer.get('url', ''))
                 if not checked or checked[0] != key or checked[2] != offer['url']:
                     continue
@@ -187,7 +194,7 @@ def run_publisher(args, parser):
             theme = offer.get('tema_radar')
             try:
                 if not is_coupon:
-                    offer = affiliate.prepare(offer)
+                    offer = ml_manual.prepare(offer) if is_ml_manual else affiliate.prepare(offer)
                     if not valid_price(offer):
                         raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
                 if theme:

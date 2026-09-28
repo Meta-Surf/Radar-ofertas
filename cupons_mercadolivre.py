@@ -89,6 +89,8 @@ def visible_length(text):
 
 
 def prepare_alert(alert):
+    from mercadolivre_manual import coupon_links
+    coupon_links(alert)
     text = clean_text(alert.get('text', ''))
     items = entries(text)
     if not items or not re.search(r'\bmercado\s+livre\b', text, re.I):
@@ -115,6 +117,10 @@ def send_alert(token, channel, alert, image=None):
         image = None
     method = 'sendPhoto' if image else 'sendMessage'
     data = {'chat_id': channel, 'parse_mode': 'HTML', 'caption' if image else 'text': text}
+    from mercadolivre_manual import coupon_links
+    own_links = coupon_links(alert)
+    if own_links:
+        data['reply_markup'] = json.dumps({'inline_keyboard': [[{'text': '🎟️ ACESSAR CUPONS' + (f' {i}' if len(own_links) > 1 else ''), 'url': url}] for i, url in enumerate(own_links, 1)]})
     endpoint = f'https://api.telegram.org/bot{token}/{method}'
     if image:
         with image.open('rb') as photo:
