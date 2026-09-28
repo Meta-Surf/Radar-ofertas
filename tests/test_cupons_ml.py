@@ -51,7 +51,8 @@ class MLCouponTests(unittest.TestCase):
                     'www.outra-loja.com.br\n@terceiro\n'
                     '<a href="https://outro.com/compra">cupom</a>')
         rendered = ml.alert_caption(row)
-        self.assertNotRegex(rendered, r'https?://|www\.|meli\.la|t\.me|@terceiro|href=')
+        self.assertNotRegex(rendered.replace(ml.DEFAULT_SOCIAL_URL, ''), r'https?://|www\.|meli\.la|t\.me|@terceiro|href=')
+        self.assertEqual(rendered.count(ml.DEFAULT_SOCIAL_URL), 1)
         self.assertIn('somente primeira compra', rendered)
 
     def test_non_ml_and_non_coupon_are_not_classified(self):
@@ -85,7 +86,7 @@ class MLCouponTests(unittest.TestCase):
                     self.assertEqual(post.call_args.kwargs['data']['caption'].count('<code>'), 14)
 
     def test_short_list_single_photo_and_counts_parsed_html(self):
-        row = build('Mercado Livre\n10% OFF acima de R$ 149: TESTECUPOM\n' + 'A'*940)
+        row = build('Mercado Livre\n10% OFF acima de R$ 149: TESTECUPOM\n' + 'A'*850)
         self.assertLessEqual(ml.visible_length(ml.alert_caption(row)), 1024)
         with tempfile.TemporaryDirectory() as directory:
             photo = Path(directory) / 'banner.png'; photo.write_bytes(b'fake')

@@ -129,9 +129,9 @@ radar. A mesma URL tem uma identidade estável para evitar reenvio; URLs diferen
 para o mesmo produto podem não ser reconhecidas como duplicatas. A última edição
 pendente substitui a anterior. Oferta já publicada não é reenviada só por edição.
 
-Listas de cupons preservam seus códigos e condições em uma só publicação. No grupo
-manual, links Mercado Livre fornecidos pelo operador são mantidos em botões. Em
-outros grupos, continuam removidos. Não encaminha botões ou links externos à loja.
+Listas de cupons preservam seus códigos e condições em uma só publicação. Todos
+os alertas ML, inclusive da entrada manual, usam o Social configurado diretamente
+no texto, sem botões. Links e chamadas de resgate de terceiros são removidos.
 O cabeçalho “NOVOS CUPONS” também é aceito no grupo manual, mesmo sem o nome da loja.
 Mantêm-se os limites de 1024/4096, regras de idade, conteúdo protegido e resultado
 de envio incerto. Diagnóstico e simulação não publicam.
@@ -151,3 +151,17 @@ na condição da mensagem; dados explícitos do operador prevalecem. Login, capt
 403 persistente ou vitrine ambígua não são contornados. CLI mercadolivre_auto.py
 --testar URL diagnostica sem publicar. Consulte MERCADO_LIVRE_AUTOMATICO.md para
 instalação e limites do teste real do link 2wpg8CQ.
+
+## Social no texto dos cupons Mercado Livre
+
+Cada alerta termina com “Resgate aqui:” e a URL
+https://www.mercadolivre.com.br/social/bebidastaio diretamente no texto. Não cria
+botão, não reutiliza manual_links de filas antigas e inclui o Social mesmo sem
+link na origem. Rótulos isolados como “LINK:” e “resgate aqui” são removidos.
+Códigos e condições são preservados. ML_CUPONS_SOCIAL_URL permite configurar
+outra URL HTTPS /social/ do Mercado Livre; ausente ou vazio usa o padrão acima.
+Não acrescenta o parâmetro ref específico do produto compartilhado anteriormente.
+
+O limite de legenda é calculado incluindo a URL: acima de 1024 usa texto único;
+acima de 4096 bloqueia sem dividir nem cortar. O botão VER OFERTA dos produtos
+continua no fluxo próprio. Reinicie monitor e publicador após atualizar.

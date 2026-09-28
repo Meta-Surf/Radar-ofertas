@@ -84,7 +84,7 @@ class ManualMLTests(unittest.TestCase):
                 publisher.send('fake', '@fake', dict(raw, chat_id=-123), None)
             post.assert_not_called()
 
-    def test_manual_coupons_keep_links_other_groups_remove_them(self):
+    def test_coupons_use_fixed_social_in_text_even_from_manual_group(self):
         text = 'NOVOS CUPONS\n10% OFF acima de R$ 149, limite R$ 200: HOJETEMPROMO\n' + URL
         manual = ml.build_coupon(messages(text), CHAT)
         self.assertEqual(manual['manual_links'], [URL])
@@ -96,9 +96,11 @@ class ManualMLTests(unittest.TestCase):
             coupons.send_alert('fake', '@fake', manual)
             self.assertEqual(post.call_count, 1)
             data = post.call_args.kwargs['data']
-            self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'][0][0]['url'], URL)
-            with self.assertRaises(AffiliateError):
-                coupons.send_alert('fake', '@fake', dict(manual, chat_id=-123))
+            self.assertNotIn('reply_markup', data)
+            self.assertIn(coupons.DEFAULT_SOCIAL_URL, data['text'])
+            self.assertNotIn(URL, data['text'])
+            coupons.send_alert('fake', '@fake', dict(manual, chat_id=-123))
+            self.assertNotIn('reply_markup', post.call_args.kwargs['data'])
 
     def test_manual_publisher_works_without_shopee_and_sends_only_once(self):
         row = ml.build_offer(messages(), CHAT)

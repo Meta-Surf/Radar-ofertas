@@ -38,9 +38,8 @@ foto se não houver prévia. Se faltar preço, edite a mensagem; o monitor captu
 a edição. EXIGIR_IMAGEM=1 continua impedindo ofertas sem foto.
 
 Para cupons, compartilhe a lista com os códigos, condições e, se desejar, seu link
-Mercado Livre. A lista sai inteira, com a arte quando couber na legenda. Links
-manuais da loja são preservados em botões; links externos são descartados. Nos
-outros grupos monitorados os links de terceiros continuam sendo removidos.
+Mercado Livre. A lista sai inteira, com a arte quando couber na legenda. Todos os alertas de cupons incluem seu Social diretamente no texto, sem botões;
+links da origem são descartados. Veja CUPONS_SOCIAL_NO_TEXTO.md.
 
 Só mensagens novas e edições recebidas enquanto o monitor estiver ativo serão
 captadas. Não percorre todo o histórico. Não realiza publicações de teste reais.
