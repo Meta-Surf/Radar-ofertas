@@ -38,3 +38,6 @@ venv/
 
 # Arte original restaurada automaticamente das partes versionadas
 /assets/banner_cupons.png
+
+# Destinos informados localmente para redirecionadores
+destinos_confirmados.json

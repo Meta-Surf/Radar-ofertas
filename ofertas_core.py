@@ -1,5 +1,7 @@
 """Funções locais: produtos, cupons e registro persistente por dia."""
 import html
+import json
+from pathlib import Path
 import re
 import sqlite3
 import time
@@ -14,6 +16,9 @@ HOSTS = {'shopee.com.br', 'www.shopee.com.br', 's.shopee.com.br', 'shope.ee',
          'mercadolivre.com.br', 'www.mercadolivre.com.br', 'produto.mercadolivre.com.br',
          'mercadolivre.com', 'www.mercadolivre.com', 'meli.la'}
 
+# Intermediário usado nas ofertas enviadas pelo usuário; não é uma loja.
+PRODUCT_REDIRECTORS = {'desconto.games'}
+
 # Correspondências informadas pelo usuário. Não são links de afiliado.
 # Só o endereço exato (ignorando fragmento e barra final) recebe este destino.
 KNOWN_DESTINATIONS = {
@@ -25,8 +30,12 @@ KNOWN_DESTINATIONS = {
 }
 
 def safe_url(url):
-    p = urlparse(url)
-    return p.scheme == 'https' and p.hostname in HOSTS and not p.username and p.port in (None, 443)
+    try:
+        p = urlparse(url)
+        return (p.scheme == 'https' and p.hostname in HOSTS | PRODUCT_REDIRECTORS
+                and not p.username and not p.password and p.port in (None, 443))
+    except (ValueError, TypeError):
+        return False
 
 def product(url):
     if not safe_url(url):
@@ -116,17 +125,34 @@ def page_product(content, base_url):
 def resolve(url, report=None):
     """Resolve HTTP e metadados principais da Shopee; nunca executa scripts."""
     report = report or (lambda text: None)
-    confirmed = KNOWN_DESTINATIONS.get(url.split('#', 1)[0].rstrip('/'))
+    key = url.split('#', 1)[0].rstrip('/')
+    confirmed = KNOWN_DESTINATIONS.get(key)
+    if safe_url(url) and urlparse(url).hostname in PRODUCT_REDIRECTORS:
+        mapping_path = Path(__file__).resolve().parent / 'destinos_confirmados.json'
+        if mapping_path.exists():
+            try:
+                mappings = json.loads(mapping_path.read_text(encoding='utf-8'))
+                candidate = mappings.get(key) if isinstance(mappings, dict) else None
+                identified = product(candidate) if isinstance(candidate, str) else None
+                if identified and identified[1] == 'Shopee':
+                    confirmed = identified[2]
+            except (OSError, ValueError):
+                report('Cadastro local de destinos inválido; tentando resolução normal.')
     if confirmed:
         known = product(confirmed)
         if known:
             report('Destino informado pelo usuário: link reconhecido sem consultar o encurtador.')
             return known
     import requests
+    visited = set()
     for _ in range(6):
         if not safe_url(url):
             report('Redirecionamento para domínio não reconhecido.')
             return None
+        if url in visited:
+            report('Redirecionamento circular; produto não identificado.')
+            return None
+        visited.add(url)
         known = embedded_product(url)
         if known:
             return known
@@ -148,7 +174,11 @@ def resolve(url, report=None):
                     report('Metadados principais não identificaram um produto único.')
                 report('Página sem redirecionamento HTTP; produto não identificado.')
                 return None
-            url = urljoin(url, r.headers.get('Location', ''))
+            location = r.headers.get('Location')
+            if not location:
+                report('Redirecionamento sem cabeçalho Location; produto não identificado.')
+                return None
+            url = urljoin(url, location)
     report('Limite de redirecionamentos atingido.')
     return None
 
@@ -256,7 +286,19 @@ def price_info(text):
                                'price_from': bool(re.search(r'\ba partir de\b', prefix, re.I))})
     # Nunca escolhe o menor de dois preços/modos de pagamento sem contexto.
     identities = {(c['price'], c['price_condition'], c['price_from']) for c in candidates}
-    return candidates[0] if len(identities) == 1 else None
+    if len(identities) != 1:
+        return None
+    info = candidates[0]
+    # Preserva uma instrução explícita de ativação; não subtrai a porcentagem.
+    activation = re.compile(
+        r'(?:ative|aplique|use|utilize)\s+(?:o\s+)?cupom\s+(?:de\s+)?'
+        r'\d{1,2}(?:[,.]\d{1,2})?\s*%\s*(?:OFF|de\s+desconto)?'
+        r'(?:\s+no\s+(?:carrinho|app|aplicativo))?[.!]?', re.I)
+    for raw in clean_text.splitlines():
+        line = re.sub(r'[*_`]', '', raw).strip().lstrip('-• ').strip()
+        if activation.fullmatch(line) and line.lower() not in info['price_condition'].lower():
+            info['price_condition'] = '; '.join(filter(None, [info['price_condition'], line]))
+    return info
 
 def price(text):
     info = price_info(text)
