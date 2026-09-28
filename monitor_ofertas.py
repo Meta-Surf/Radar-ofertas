@@ -207,7 +207,7 @@ async def main():
                         logging.warning('Imagem manual indisponível na mensagem %s.', photo.id)
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
-                print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando edição')
+                print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
                 return
             alerts = build_alerts(messages, chat_id)
             if alerts:

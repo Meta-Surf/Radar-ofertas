@@ -124,134 +124,158 @@ def run_publisher(args, parser):
     announced = set()
     retry_at = {}
     prepared_coupons = {}
+    from mercadolivre_auto import AutoReader
+    auto_reader = AutoReader()
     print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee e listas de cupons. Ctrl+C para parar.')
-    while True:
-        if not args.simular:
-            delay = ledger.publication_delay(clock_id=3)
-            if delay > 0:
-                time.sleep(min(delay, 1))
-                continue
-        for offer in ordered_rows(intelligence, channel):
-            key = offer.get('product_id')
-            is_coupon = offer.get('kind') == 'coupon_alert'
-            is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
-            is_ml_manual = offer.get('kind') == 'ml_manual_offer'
-            if affiliate is None and not is_ml_coupon and not is_ml_manual:
-                continue
-            if not isinstance(key, str):
-                continue
-            if is_ml_manual:
-                if not ml_manual.trusted(offer.get('chat_id')):
+    try:
+        while True:
+            if not args.simular:
+                delay = ledger.publication_delay(clock_id=3)
+                if delay > 0:
+                    time.sleep(min(delay, 1))
                     continue
-            elif not is_coupon:
-                checked = product(offer.get('url', ''))
-                if not checked or checked[0] != key or checked[2] != offer['url']:
+            for offer in ordered_rows(intelligence, channel):
+                key = offer.get('product_id')
+                is_coupon = offer.get('kind') == 'coupon_alert'
+                is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
+                is_ml_manual = offer.get('kind') == 'ml_manual_offer'
+                if affiliate is None and not is_ml_coupon and not is_ml_manual:
                     continue
-                offer['store'] = checked[1]
-                if checked[1] != 'Shopee':
+                if not isinstance(key, str):
+                    continue
+                if is_ml_manual:
+                    if not ml_manual.trusted(offer.get('chat_id')):
+                        continue
+                elif not is_coupon:
+                    checked = product(offer.get('url', ''))
+                    if not checked or checked[0] != key or checked[2] != offer['url']:
+                        continue
+                    offer['store'] = checked[1]
+                    if checked[1] != 'Shopee':
+                        if key not in announced:
+                            print('Aguardando integração de afiliados da loja:', checked[1])
+                            announced.add(key)
+                        continue
+                try:
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if age < -60 or age > max_age * 60:
+                    continue
+                if is_ml_manual:
+                    if time.monotonic() < retry_at.get(key, 0):
+                        continue
+                    if not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
+                        continue
+                    if not offer.get('name') or not valid_price(offer) or (require_photo and not (offer.get('api_image') or photo_path(offer))):
+                        try:
+                            ready = auto_reader.read(offer, blocking=args.simular)
+                            if ready is None:
+                                marker = ('leitura_ml', key)
+                                if marker not in announced:
+                                    print('Buscando título, preço e imagem do link Mercado Livre:', key)
+                                    announced.add(marker)
+                                continue
+                            offer = ready
+                        except AffiliateError as error:
+                            print('Leitura automática ML pendente:', key, '|', str(error))
+                            retry_at[key] = time.monotonic() + 300
+                            continue
+                if not is_coupon and not valid_price(offer):
+                    marker = ('sem_preco', key)
+                    if marker not in announced:
+                        print('Aguardando preço explícito ou edição na origem:', key)
+                        announced.add(marker)
+                    continue
+                if time.monotonic() < retry_at.get(key, 0):
+                    continue
+                if args.simular and key in announced:
+                    continue
+                if is_coupon:
+                    raw_key = key
+                    try:
+                        if raw_key not in prepared_coupons:
+                            prepared_coupons[raw_key] = (ml_coupons.prepare_alert(offer) if is_ml_coupon else prepare_alert(affiliate, offer))
+                        offer = prepared_coupons[raw_key]
+                        key = offer['product_id']
+                    except AffiliateError as error:
+                        print(str(error))
+                        retry_at[raw_key] = time.monotonic() + 300
+                        continue
+                    if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
+                        continue
+                origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
+                if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
+                    continue
+                if not args.simular:
+                    states = ledger.db.execute('SELECT status FROM posts WHERE product=?', (key,)).fetchall()
+                    if states and (any(state[0] != 'sent' for state in states)
+                                   or not intelligence.can_repeat(offer, channel)):
+                        continue
+                day = None
+                theme = offer.get('tema_radar')
+                try:
+                    if not is_coupon:
+                        offer = ml_manual.prepare(offer) if is_ml_manual else affiliate.prepare(offer)
+                        if not valid_price(offer):
+                            raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
+                    if theme:
+                        offer['tema_radar'] = theme
+                        from radar_shopee_continuo import pertence_ao_tema
+                        if not pertence_ao_tema(theme, offer):
+                            raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
+                except AffiliateError as e:
+                    if day:
+                        ledger.release(key, day)
+                    print(str(e))
+                    if origin == 'radar':
+                        intelligence.discard(key)
+                    retry_at[key] = time.monotonic() + 300
+                    continue
+                if not is_coupon:
+                    offer['history_badge'] = intelligence.badge(offer, channel)
+                day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
+                if not args.simular and not day:
+                    continue
+                image = (ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon else (offer.get('api_image') or photo_path(offer))
+                if require_photo and not image and not is_coupon:
                     if key not in announced:
-                        print('Aguardando integração de afiliados da loja:', checked[1])
+                        print('Aguardando imagem autorizada:', key)
+                        announced.add(key)
+                    if day:
+                        ledger.release(key, day)
+                    retry_at[key] = time.monotonic() + 60
+                    continue
+                if args.simular:
+                    if key not in announced:
+                        preview = (ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon else caption(offer)
+                        links = [] if is_ml_coupon else ([e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']])
+                        print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                         announced.add(key)
                     continue
-            try:
-                age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
-            except (KeyError, TypeError, ValueError):
-                continue
-            if age < -60 or age > max_age * 60:
-                continue
-            if not is_coupon and not valid_price(offer):
-                marker = ('sem_preco', key)
-                if marker not in announced:
-                    print('Aguardando preço explícito ou edição na origem:', key)
-                    announced.add(marker)
-                continue
-            if time.monotonic() < retry_at.get(key, 0):
-                continue
-            if args.simular and key in announced:
-                continue
-            if is_coupon:
-                raw_key = key
                 try:
-                    if raw_key not in prepared_coupons:
-                        prepared_coupons[raw_key] = (ml_coupons.prepare_alert(offer) if is_ml_coupon else prepare_alert(affiliate, offer))
-                    offer = prepared_coupons[raw_key]
-                    key = offer['product_id']
-                except AffiliateError as error:
-                    print(str(error))
-                    retry_at[raw_key] = time.monotonic() + 300
-                    continue
-                if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
-                    continue
-            origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
-            if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
-                continue
-            if not args.simular:
-                states = ledger.db.execute('SELECT status FROM posts WHERE product=?', (key,)).fetchall()
-                if states and (any(state[0] != 'sent' for state in states)
-                               or not intelligence.can_repeat(offer, channel)):
-                    continue
-            day = None
-            theme = offer.get('tema_radar')
-            try:
-                if not is_coupon:
-                    offer = ml_manual.prepare(offer) if is_ml_manual else affiliate.prepare(offer)
-                    if not valid_price(offer):
-                        raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
-                if theme:
-                    offer['tema_radar'] = theme
-                    from radar_shopee_continuo import pertence_ao_tema
-                    if not pertence_ao_tema(theme, offer):
-                        raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
-            except AffiliateError as e:
-                if day:
+                    # Grava antes do envio: falha ou reinício não encurta a pausa.
+                    if origin == 'radar':
+                        ledger.mark_attempt(interval, clock_id=2)
+                    message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
+                except Exception:
+                    print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
+                          '(Confira o canal; detalhes sensíveis foram omitidos.)')
+                    break
+                if message_id is None:
                     ledger.release(key, day)
-                print(str(e))
-                if origin == 'radar':
-                    intelligence.discard(key)
-                retry_at[key] = time.monotonic() + 300
-                continue
-            if not is_coupon:
-                offer['history_badge'] = intelligence.badge(offer, channel)
-            day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
-            if not args.simular and not day:
-                continue
-            image = (ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon else (offer.get('api_image') or photo_path(offer))
-            if require_photo and not image and not is_coupon:
-                if key not in announced:
-                    print('Aguardando imagem autorizada:', key)
-                    announced.add(key)
-                if day:
-                    ledger.release(key, day)
-                retry_at[key] = time.monotonic() + 60
-                continue
+                    print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
+                    retry_at[key] = time.monotonic() + max(wait, 1)
+                    ledger.mark_attempt(max(wait, 1), clock_id=3)
+                    break
+                ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
+                break  # Lê novamente as filas e verifica a idade após a espera.
             if args.simular:
-                if key not in announced:
-                    preview = (ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon else caption(offer)
-                    links = [] if is_ml_coupon else ([e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']])
-                    print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
-                    announced.add(key)
-                continue
-            try:
-                # Grava antes do envio: falha ou reinício não encurta a pausa.
-                if origin == 'radar':
-                    ledger.mark_attempt(interval, clock_id=2)
-                message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
-            except Exception:
-                print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
-                      '(Confira o canal; detalhes sensíveis foram omitidos.)')
                 break
-            if message_id is None:
-                ledger.release(key, day)
-                print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
-                retry_at[key] = time.monotonic() + max(wait, 1)
-                ledger.mark_attempt(max(wait, 1), clock_id=3)
-                break
-            ledger.finish(key, day, message_id, offer=offer, channel=channel)
-            print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
-            break  # Lê novamente as filas e verifica a idade após a espera.
-        if args.simular:
-            break
-        time.sleep(1)
+            time.sleep(1)
+    finally:
+        auto_reader.close()
 
 if __name__ == '__main__':
     try:

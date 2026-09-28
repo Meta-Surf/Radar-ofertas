@@ -115,13 +115,12 @@ permite baixar as fotos desse grupo, inclusive fotos da prévia do link. Se a co
 não o encontrar, avisa e mantém os demais grupos; não entra em grupos por conta
 própria. O canal de destino continua sendo TELEGRAM_CANAL e não pode ser a origem.
 
-Envie foto (ou prévia com foto), título, preço explícito, condição de pagamento e
-um link HTTPS do Mercado Livre ou meli.la. Links repetidos idênticos contam como
+Envie um link HTTPS do Mercado Livre ou meli.la. A leitura automática descrita
+abaixo completa título, preço e imagem ausentes. Também aceita dados já escritos pelo operador. Links repetidos idênticos contam como
 um. Dois links de produto diferentes na mesma oferta são recusados, pois não se
-sabe a qual produto o preço/imagem pertence. Sem preço, aguarda edição na origem;
-sem foto, respeita EXIGIR_IMAGEM. Não consulta a API ML, não expande o encurtador,
-não altera parâmetros e não comprova titularidade do afiliado nem preço na loja:
-esses dados são os fornecidos pelo operador. Apenas compartilhar um link comum
+sabe a qual produto o preço/imagem pertence. Dados ausentes acionam a consulta automática; sem resultado válido,
+a publicação fica pendente e respeita EXIGIR_IMAGEM. Não consulta a API ML. A leitura pública pode expandir o encurtador para consultar
+o produto, mas não altera o link do botão nem comprova titularidade de afiliado. Apenas compartilhar um link comum
 não o transforma em afiliado.
 
 As ofertas manuais usam título, loja, preço em negrito, condição em linha abaixo,
@@ -136,3 +135,19 @@ outros grupos, continuam removidos. Não encaminha botões ou links externos à 
 O cabeçalho “NOVOS CUPONS” também é aceito no grupo manual, mesmo sem o nome da loja.
 Mantêm-se os limites de 1024/4096, regras de idade, conteúdo protegido e resultado
 de envio incerto. Diagnóstico e simulação não publicam.
+
+## Leitura automática Mercado Livre
+
+Instale dependências e Chromium com instalar_ml_automatico.cmd. Uma mensagem
+somente com link no grupo manual pode ser enfileirada. Antes de validar preço,
+o publicador agenda a leitura por HTTP/navegador em segundo plano e completa os
+dados ausentes. Os outros itens continuam sendo processados. As tarefas são
+limitadas a uma execução e até quatro consultas pendentes, com cache por mensagem
+e edição de cinco minutos. Jobs antigos concluídos são recolhidos.
+
+Somente Product/Offer inequívocos, moeda BRL, InStock e imagem mlstatic são aceitos.
+Não extrai preços de parcelas/recomendações/faixas. O preço público é identificado
+na condição da mensagem; dados explícitos do operador prevalecem. Login, captcha,
+403 persistente ou vitrine ambígua não são contornados. CLI mercadolivre_auto.py
+--testar URL diagnostica sem publicar. Consulte MERCADO_LIVRE_AUTOMATICO.md para
+instalação e limites do teste real do link 2wpg8CQ.

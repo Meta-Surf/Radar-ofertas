@@ -46,9 +46,7 @@ def build_offer(messages, chat):
         raise AffiliateError('Entrada manual ML: envie um único link Mercado Livre por oferta.')
     text = html.unescape('\n'.join(m.raw_text or '' for m in messages))
     lines = [re.sub(r'[*_`]', '', s).strip() for s in text.splitlines()]
-    title = next((s for s in lines if s and not re.search(r'https?://|www\.|R\$|\b(?:cupom|compre|link|grupo|por|de|agora)\s*:', s, re.I)), '')
-    if not title:
-        raise AffiliateError('Entrada manual ML: acrescente o nome do produto junto ao link.')
+    title = next((s for s in lines if s and not s.lower().startswith(('visite a página', 'encontre todos os produtos')) and not re.search(r'https?://|www\.|R\$|\b(?:cupom|compre|link|grupo|por|de|agora)\s*:', s, re.I)), '')
     info = price_info(text) or {}
     return dict(kind='ml_manual_offer', source='telegram', store='Mercado Livre',
                 product_id=key(urls[0]), url=urls[0], name=title,
