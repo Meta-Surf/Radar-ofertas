@@ -16,6 +16,8 @@ from telethon import TelegramClient, events
 from ofertas_core import extract_links, resolve, price, price_info, coupon, coupon_page_links, safe_url
 from cupons_shopee import build_alerts, coupon_entries
 from cupons_mercadolivre import build_alert as build_ml_alert
+import mercadolivre_manual as ml_manual
+from shopee_afiliados import AffiliateError
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -97,6 +99,11 @@ async def main():
                 print(d.id, d.name)
             return
         requested = [x.strip() for x in os.getenv('TG_CHATS', '').split(',') if x.strip()]
+        if ml_manual.chat_id() and ml_manual.chat_id() not in requested:
+            if any(str(d.id) == ml_manual.chat_id() for d in dialogs):
+                requested.append(ml_manual.chat_id())
+            else:
+                print('Grupo manual ML não encontrado nesta conta; os demais grupos continuam ativos:', ml_manual.chat_id())
         if not requested:
             parser.error('Preencha TG_CHATS com IDs negativos ou @nomes da lista.')
         selected = []
@@ -109,6 +116,8 @@ async def main():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
         allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
+        if ml_manual.chat_id():
+            allowed_media.add(ml_manual.chat_id())
         if args.diagnosticar:
             match = re.fullmatch(r'https://t\.me/([A-Za-z0-9_]+)/(\d+)/?', args.diagnosticar)
             if not match:
@@ -132,11 +141,19 @@ async def main():
             print('Condição do preço:', (price_info(raw) or {}).get('price_condition') or 'ausente')
             print('Código de cupom explícito:', coupon(raw) or 'ausente')
             print('Foto nesta mensagem:', bool(message.photo), '| pertence a álbum:', bool(message.grouped_id))
-            ml_alert = build_ml_alert([message], dialog.id)
+            ml_alert = ml_manual.build_coupon([message], dialog.id)
             if ml_alert:
                 from cupons_mercadolivre import alert_caption, visible_length
                 print('Lista Mercado Livre:', len(ml_alert['entries']), 'cupons; links removidos.')
                 print('Caracteres:', visible_length(alert_caption(ml_alert)))
+                print('Diagnóstico encerrado. Nada foi publicado ou colocado na fila.')
+                return
+            if ml_manual.trusted(dialog.id):
+                try:
+                    row = ml_manual.build_offer([message], dialog.id)
+                    print('Entrada manual ML: link preservado; preço:', row['price'] or 'ausente/ambíguo')
+                except AffiliateError as error:
+                    print(str(error))
                 print('Diagnóstico encerrado. Nada foi publicado ou colocado na fila.')
                 return
             entries = coupon_entries([message])
@@ -167,11 +184,30 @@ async def main():
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
-            ml_alert = build_ml_alert(messages, chat_id)
+            ml_alert = ml_manual.build_coupon(messages, chat_id)
             if ml_alert:
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
                 print('Lista de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
+                return
+            if ml_manual.trusted(chat_id):
+                try:
+                    row = ml_manual.build_offer(messages, chat_id)
+                except AffiliateError as error:
+                    print(str(error), '| mensagem', messages[0].id)
+                    return
+                photo = next((m for m in messages if m.photo), None)
+                if photo:
+                    try:
+                        target = media_dir / f'{chat_id}_{photo.id}.jpg'
+                        downloaded = await client.download_media(photo, file=str(target))
+                        if downloaded and target.exists() and 0 < target.stat().st_size <= 10_000_000:
+                            row['image'] = str(target.relative_to(BASE))
+                    except Exception:
+                        logging.warning('Imagem manual indisponível na mensagem %s.', photo.id)
+                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                    out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando edição')
                 return
             alerts = build_alerts(messages, chat_id)
             if alerts:

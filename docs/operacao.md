@@ -105,3 +105,34 @@ não são necessárias para as listas ML. TELEGRAM_TOKEN, TELEGRAM_CANAL e a
 configuração existente do monitor continuam necessários. `--diagnosticar` informa
 quantos códigos foram reconhecidos sem publicar. `--simular` mostra as listas sem
 postar; outros itens Shopee dessa mesma fila ainda podem consultar a API Shopee.
+
+## Publicador Mercado Livre: entrada manual
+
+O grupo `-1003988174916` é a origem manual autorizada. `ML_MANUAL_CHAT` pode
+substituir esse ID; valor vazio desativa. O monitor inclui o grupo automaticamente
+quando a conta Telegram conectada já participa dele, sem apagar TG_CHATS. Também
+permite baixar as fotos desse grupo, inclusive fotos da prévia do link. Se a conta
+não o encontrar, avisa e mantém os demais grupos; não entra em grupos por conta
+própria. O canal de destino continua sendo TELEGRAM_CANAL e não pode ser a origem.
+
+Envie foto (ou prévia com foto), título, preço explícito, condição de pagamento e
+um link HTTPS do Mercado Livre ou meli.la. Links repetidos idênticos contam como
+um. Dois links de produto diferentes na mesma oferta são recusados, pois não se
+sabe a qual produto o preço/imagem pertence. Sem preço, aguarda edição na origem;
+sem foto, respeita EXIGIR_IMAGEM. Não consulta a API ML, não expande o encurtador,
+não altera parâmetros e não comprova titularidade do afiliado nem preço na loja:
+esses dados são os fornecidos pelo operador. Apenas compartilhar um link comum
+não o transforma em afiliado.
+
+As ofertas manuais usam título, loja, preço em negrito, condição em linha abaixo,
+cupom e botão VER OFERTA. Têm prioridade dos grupos e não esperam os 10 minutos do
+radar. A mesma URL tem uma identidade estável para evitar reenvio; URLs diferentes
+para o mesmo produto podem não ser reconhecidas como duplicatas. A última edição
+pendente substitui a anterior. Oferta já publicada não é reenviada só por edição.
+
+Listas de cupons preservam seus códigos e condições em uma só publicação. No grupo
+manual, links Mercado Livre fornecidos pelo operador são mantidos em botões. Em
+outros grupos, continuam removidos. Não encaminha botões ou links externos à loja.
+O cabeçalho “NOVOS CUPONS” também é aceito no grupo manual, mesmo sem o nome da loja.
+Mantêm-se os limites de 1024/4096, regras de idade, conteúdo protegido e resultado
+de envio incerto. Diagnóstico e simulação não publicam.
