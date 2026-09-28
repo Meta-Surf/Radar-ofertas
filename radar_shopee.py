@@ -102,6 +102,8 @@ def refresh(client, offer):
             updated = candidate(node, offer.get('filter_discount', 20),
                                 offer.get('filter_rating', 4.5), offer.get('filter_sales', 50))
             if updated:
+                if offer.get('tema_radar'):
+                    updated['tema_radar'] = offer['tema_radar']
                 return updated
     raise AffiliateError('Oferta Shopee indisponível ou fora dos filtros na revalidação; envio bloqueado.')
 
@@ -161,7 +163,13 @@ def main():
                     prefix = 'a partir de ' if offer['price_from'] else ''
                     print(f"{offer['name']} | {prefix}R$ {offer['price']} | desconto informado {offer['discount']:g}% | nota {offer['rating']:g} | vendas {offer['sales']}")
                 if args.enfileirar:
-                    save_snapshot(offers, BASE / 'fila_shopee_api.jsonl')
+                    from ofertas_core import Ledger
+                    from inteligencia_ofertas import Intelligence
+                    ledger = Ledger(BASE / 'publicacoes.sqlite3')
+                    try:
+                        Intelligence(ledger.db).enqueue(offers)
+                    finally:
+                        ledger.db.close()
                     print('Fila Shopee atualizada. O publicador gera seu link e controla repetição diária.')
                 elif not offers:
                     print('Tente outra busca ou ajuste os filtros; esta consulta não cobre todo o catálogo.')
@@ -183,3 +191,4 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         print('Radar Shopee encerrado.')
+

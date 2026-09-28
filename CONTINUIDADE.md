@@ -1,3 +1,5 @@
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+
 # Continuidade do projeto — 26/09/2026
 
 ## Ponto de partida
@@ -24,7 +26,7 @@ O banco recebido passou em PRAGMA integrity_check e contém 91 registros na tabe
 
 A PR inclui correção de preços dos grupos e integração de cupons. Os checks de GitHub Actions do commit acima concluíram com sucesso. Validação com APIs simuladas não equivale a publicação real. Nenhuma publicação real foi feita na migração.
 
-O banner aprovado ainda precisa ser associado ao arquivo correto e instalado em assets/banner_cupons.png ou CUPONS_BANNER. Sem banner, alertas usam texto e botões. Mercado Livre continua com acesso a itens bloqueado por 403 nos testes históricos; Amazon e KaBuM não têm integração confirmada.
+O banner aprovado está incluído nas partes versionadas e é restaurado automaticamente em assets/banner_cupons.png; CUPONS_BANNER permite uma arte personalizada. Sem banner, alertas usam texto e botões. Mercado Livre continua com acesso a itens bloqueado por 403 nos testes históricos; Amazon e KaBuM não têm integração confirmada.
 
 ## Acesso e retomada
 
@@ -44,4 +46,16 @@ A autenticação para o repositório privado deve ocorrer pelo mecanismo normal 
 
 ## Próxima tarefa
 
-Identificar o banner aprovado; validar preço de novas mensagens e conversão real de cupons. Trabalhar em tarefas delimitadas, registrar testes, commit e pendências a cada entrega. Não recomeçar o projeto.
+Validar preço de novas mensagens e conversão real de cupons. Trabalhar em tarefas delimitadas, registrar testes, commit e pendências a cada entrega. Não recomeçar o projeto.
+
+
+## Banner incluído no GitHub
+
+A arte original está em `assets/banner_cupons.parts/`, dividida em partes Base64
+para evitar a falha do envio binário pela integração. O bot restaura automaticamente
+`assets/banner_cupons.png` quando necessário, verificando tamanho e SHA-256.
+Não há alteração de pixels ou dependência de download. Para restaurar manualmente:
+`py banner_asset.py`. Preserve a pasta de partes ao copiar o projeto.
+
+Incluídas as correções de `**R$ 2.713,08**` e `💵2,943`, captura de edições,
+bloqueio de ofertas sem preço, valor em negrito e condições em linha separada.

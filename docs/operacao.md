@@ -1,3 +1,5 @@
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](../ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+
 # Publicador de afiliados Shopee
 
 ## O que mudou
@@ -66,3 +68,15 @@ Execute `py -m unittest discover -v` para repetir os testes. Eles não usam suas
 A autenticação e o esquema generateShortLink(input: ShortLinkInput), originUrl, subIds e shortLink foram conferidos no HTML e no esquema incorporado dos exploradores oficiais em 25/09/2026:
 - https://open-api.affiliate.shopee.com.br/explorer
 - https://open-api.affiliate.shopee.com.br/explorer/v2
+
+
+## Banner incluído no GitHub
+
+A arte original está em `assets/banner_cupons.parts/`, dividida em partes Base64
+para evitar a falha do envio binário pela integração. O bot restaura automaticamente
+`assets/banner_cupons.png` quando necessário, verificando tamanho e SHA-256.
+Não há alteração de pixels ou dependência de download. Para restaurar manualmente:
+`py banner_asset.py`. Preserve a pasta de partes ao copiar o projeto.
+
+Incluídas as correções de `**R$ 2.713,08**` e `💵2,943`, captura de edições,
+bloqueio de ofertas sem preço, valor em negrito e condições em linha separada.

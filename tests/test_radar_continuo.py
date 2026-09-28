@@ -6,7 +6,7 @@ from radar_shopee_continuo import TEMAS, REGRAS_TEMA, pertence_ao_tema, select
 
 class RadarContinuoTests(unittest.TestCase):
     def test_categories_and_accessory_exclusion(self):
-        self.assertEqual(len(TEMAS), 22)
+        self.assertEqual(len(TEMAS), 24)
         self.assertEqual({theme for theme, _ in TEMAS}, set(REGRAS_TEMA))
         cases = [
             ('Televisores', 'Smart TV 55 polegadas', True),
@@ -31,3 +31,4 @@ class RadarContinuoTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

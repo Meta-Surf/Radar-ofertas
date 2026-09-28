@@ -8,7 +8,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from ofertas_core import Ledger, caption, product
+from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 
@@ -29,14 +29,25 @@ def rows():
             except json.JSONDecodeError:
                 continue
 
-def ordered_rows():
+def ordered_rows(intelligence=None, channel=""):
     # Prioridade absoluta aos grupos; preserva o ranking da fila do radar.
-    groups, radar = [], []
+    groups, radar, latest = [], [], {}
     for offer in rows():
-        (radar if offer.get('source') == 'shopee_api' else groups).append(offer)
+        if offer.get('source') == 'shopee_api':
+            radar.append(offer)
+        elif offer.get('kind') != 'coupon_alert' and offer.get('chat_id') is not None and offer.get('message_id') is not None:
+            # A fila é append-only: a última captura substitui a versão anterior,
+            # inclusive quando a edição remove o preço.
+            latest[(offer['chat_id'], offer['message_id'])] = offer
+        else:
+            groups.append(offer)
+    groups.extend(latest.values())
     groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
     yield from groups
-    yield from radar
+    if intelligence is None:
+        yield from radar
+    else:
+        yield from intelligence.pending(channel)
 
 def photo_path(offer):
     value = offer.get('image')
@@ -48,8 +59,12 @@ def photo_path(offer):
     return path if 0 < path.stat().st_size <= 10_000_000 else None
 
 def send(token, channel, offer, image):
+    if not valid_price(offer):
+        raise AffiliateError('Publicação bloqueada: preço ausente ou inválido.')
     if not offer.get('affiliate_generated') or not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
+    if len(caption(offer).encode('utf-16-le')) // 2 > 1024:
+        image = None
     method = 'sendPhoto' if image else 'sendMessage'
     data = {'chat_id': channel, 'parse_mode': 'HTML',
             'reply_markup': json.dumps({'inline_keyboard': [[{'text': '🛒 VER OFERTA', 'url': offer['affiliate_url']}]]})}
@@ -69,6 +84,13 @@ def send(token, channel, offer, image):
     if result.get('ok') is False:
         return None, int(result.get('parameters', {}).get('retry_after', 60))
     return int(result['result']['message_id']), 0
+
+def valid_price(offer):
+    value = offer.get('price')
+    if not isinstance(value, str):
+        return False
+    info = price_info('R$ ' + value)
+    return bool(info and info['price'] == value and not info['price_condition'])
 
 def main():
     parser = argparse.ArgumentParser()
@@ -92,6 +114,8 @@ def run_publisher(args, parser):
     interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
+    from inteligencia_ofertas import Intelligence
+    intelligence = Intelligence(ledger.db)
     announced = set()
     retry_at = {}
     prepared_coupons = {}
@@ -102,7 +126,7 @@ def run_publisher(args, parser):
             if delay > 0:
                 time.sleep(min(delay, 1))
                 continue
-        for offer in ordered_rows():
+        for offer in ordered_rows(intelligence, channel):
             key = offer.get('product_id')
             is_coupon = offer.get('kind') == 'coupon_alert'
             if not isinstance(key, str):
@@ -122,6 +146,12 @@ def run_publisher(args, parser):
             except (KeyError, TypeError, ValueError):
                 continue
             if age < -60 or age > max_age * 60:
+                continue
+            if not is_coupon and not valid_price(offer):
+                marker = ('sem_preco', key)
+                if marker not in announced:
+                    print('Aguardando preço explícito ou edição na origem:', key)
+                    announced.add(marker)
                 continue
             if time.monotonic() < retry_at.get(key, 0):
                 continue
@@ -143,14 +173,20 @@ def run_publisher(args, parser):
             origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
             if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
                 continue
-            day = None if args.simular else ledger.reserve(key)
-            if not args.simular and not day:
-                continue
+            if not args.simular:
+                states = ledger.db.execute('SELECT status FROM posts WHERE product=?', (key,)).fetchall()
+                if states and (any(state[0] != 'sent' for state in states)
+                               or not intelligence.can_repeat(offer, channel)):
+                    continue
+            day = None
             theme = offer.get('tema_radar')
             try:
                 if not is_coupon:
                     offer = affiliate.prepare(offer)
+                    if not valid_price(offer):
+                        raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
                 if theme:
+                    offer['tema_radar'] = theme
                     from radar_shopee_continuo import pertence_ao_tema
                     if not pertence_ao_tema(theme, offer):
                         raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
@@ -158,7 +194,14 @@ def run_publisher(args, parser):
                 if day:
                     ledger.release(key, day)
                 print(str(e))
+                if origin == 'radar':
+                    intelligence.discard(key)
                 retry_at[key] = time.monotonic() + 300
+                continue
+            if not is_coupon:
+                offer['history_badge'] = intelligence.badge(offer, channel)
+            day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
+            if not args.simular and not day:
                 continue
             image = banner_path(BASE) if is_coupon else (offer.get('api_image') or photo_path(offer))
             if require_photo and not image and not is_coupon:
@@ -191,7 +234,7 @@ def run_publisher(args, parser):
                 retry_at[key] = time.monotonic() + max(wait, 1)
                 ledger.mark_attempt(max(wait, 1), clock_id=3)
                 break
-            ledger.finish(key, day, message_id)
+            ledger.finish(key, day, message_id, offer=offer, channel=channel)
             print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
             break  # Lê novamente as filas e verifica a idade após a espera.
         if args.simular:

@@ -1,3 +1,5 @@
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](../ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+
 # Radar direto da Shopee
 
 Busca produtos pela API de Afiliados usando o mesmo `SHOPEE_APP_ID` e `SHOPEE_SECRET` do `.env`. Não depende da conta Telegram nem de mensagens de grupos para descobrir ofertas. O publicador ainda precisa do token e canal Telegram.
@@ -78,3 +80,4 @@ py radar_shopee_continuo.py --publicar --loop --intervalo 300 --limite 1
 A primeira rodada é imediata. Ao usar `--limite 2` ou `3`, o intervalo entre publicações da mesma rodada é no mínimo 300 segundos. Varrer 22 categorias pode levar tempo e consumir limites da API; a publicação só ocorre se houver produto elegível ainda não publicado. Não execute duas instâncias em pastas diferentes nem substitua o banco local. Uma versão que imprime “11 temas” é antiga: pare-a e confirme `py -c "import radar_shopee_continuo as r; print(r.__file__, len(r.TEMAS))"` antes de reiniciar.
 
 O valor `priceMin` da API aparece rotulado como preço anterior a cupons e descontos de pagamento. A mensagem orienta a conferir Pix e cupons na página. O radar não calcula nem promete um preço final do carrinho.
+

@@ -31,3 +31,10 @@ venv/
 # Pacotes de backup podem conter credenciais
 *.rar
 *.zip
+
+
+# Travas de processos locais
+*.lock
+
+# Arte original restaurada automaticamente das partes versionadas
+/assets/banner_cupons.png

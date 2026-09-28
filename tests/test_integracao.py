@@ -15,7 +15,7 @@ class IntegrationTests(unittest.TestCase):
     def test_radar_wait_does_not_delay_groups_or_reset_on_group_send(self):
         def offer(item, source):
             return dict(product_id=f'Shopee:1:{item}', url=f'https://shopee.com.br/product/1/{item}',
-                        source=source, source_date=datetime.now(timezone.utc).isoformat(),
+                        price='99,90', source=source, source_date=datetime.now(timezone.utc).isoformat(),
                         api_image='https://x.susercontent.com/a.jpg')
         g1, g2 = offer(1, 'telegram'), offer(2, 'telegram')
         r1, r2 = offer(3, 'shopee_api'), offer(4, 'shopee_api')
@@ -24,6 +24,8 @@ class IntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             ledger = Ledger(Path(d) / 'posts.db')
             try:
+                from inteligencia_ofertas import Intelligence
+                Intelligence(ledger.db).enqueue([r1,r2], now=1000)
                 with patch.object(publisher, 'Ledger', return_value=ledger), \
                      patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                      patch.object(publisher, 'rows', side_effect=[iter([r1, g1]), iter([r1]), iter([r2, g2]), iter([r2])]), \
@@ -81,21 +83,21 @@ class IntegrationTests(unittest.TestCase):
     def test_radar_queue_never_generates_or_sends_link(self):
         client = Mock()
         args = SimpleNamespace(publicar=False, enfileirar=True, loop=True, limite=3, round_index=0)
-        offer = dict(product_id='Shopee:1:2', name='Smart TV 55 polegadas', rating=5, sales=100, discount=30)
-        ledger = Mock()
-        ledger.db.execute.return_value = []
+        offer = dict(source='shopee_api', price='99,90', product_id='Shopee:1:2', name='Smart TV 55 polegadas', rating=5, sales=100, discount=30)
+        ledger = Ledger(':memory:')
         with patch('shopee_afiliados.ShopeeAffiliate.from_env', return_value=client), \
              patch('radar_shopee.collect', return_value=([offer], 1)), \
-             patch('radar_shopee.save_snapshot') as save, \
+             patch('inteligencia_ofertas.Intelligence.enqueue') as enqueue, \
              patch('ofertas_core.Ledger', return_value=ledger), \
              patch.object(radar, 'TEMAS', [('Televisores', 'smart tv')]), \
              patch.object(radar.time, 'sleep'), patch('builtins.print'), \
              patch.object(publisher, 'send') as send:
             radar.run_round(args, Mock())
-            self.assertEqual(save.call_args.args[0][0]['product_id'], 'Shopee:1:2')
+            self.assertEqual(enqueue.call_args.args[0][0]['product_id'], 'Shopee:1:2')
             client.prepare.assert_not_called()
             send.assert_not_called()
 
 
 if __name__ == '__main__':
     unittest.main()
+

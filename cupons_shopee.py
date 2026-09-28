@@ -147,10 +147,23 @@ def alert_caption(alert):
     return '\n\n'.join(parts)
 
 def banner_path(base):
+    """Resolve a arte a partir da pasta do bot, mesmo iniciado de outra pasta."""
     import os
-    value = os.getenv('CUPONS_BANNER', 'assets/banner_cupons.png')
-    path = (base / value).resolve()
-    return path if path.is_file() and 0 < path.stat().st_size <= 10_000_000 else None
+    from pathlib import Path
+    base = Path(base).resolve()
+    value = os.getenv('CUPONS_BANNER', '').strip()
+    candidates = ([base / value] if value else []) + [base / 'assets/banner_cupons.png']
+    for candidate in candidates:
+        try:
+            path = candidate.resolve()
+            if path.is_file() and 0 < path.stat().st_size <= 10_000_000:
+                return path
+        except (OSError, ValueError):
+            continue
+    if (base / 'assets/banner_cupons.parts/manifest.json').is_file():
+        from banner_asset import restore_banner
+        return restore_banner(base)
+    return None
 
 def send_alert(token, channel, alert, image=None):
     import requests
