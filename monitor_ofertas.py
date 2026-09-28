@@ -2,6 +2,9 @@
 import argparse
 import asyncio
 import json
+import hashlib
+import time
+from collections import OrderedDict
 import logging
 import os
 import re
@@ -16,6 +19,54 @@ from cupons_shopee import build_alerts, coupon_entries
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
 logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+class CaptureRevisions:
+    """Ignora atualizações sem mudança de texto, links ou mídia por uma hora."""
+    def __init__(self, limit=2048, ttl=3600):
+        self.limit, self.ttl = limit, ttl
+        self.seen = OrderedDict()
+
+    def identity(self, messages, chat_id):
+        ordered = sorted(messages, key=lambda m: m.id)
+        payload = [(m.id, m.raw_text or '', extract_links(m),
+                    getattr(getattr(m, 'photo', None), 'id', None),
+                    getattr(getattr(m, 'document', None), 'id', None)) for m in ordered]
+        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+        return (chat_id, ordered[0].id), digest
+
+    def unchanged(self, key, digest):
+        previous = self.seen.get(key)
+        return bool(previous and previous[0] == digest and time.monotonic() - previous[1] < self.ttl)
+
+    def remember(self, key, digest):
+        self.seen[key] = (digest, time.monotonic())
+        self.seen.move_to_end(key)
+        while len(self.seen) > self.limit:
+            self.seen.popitem(last=False)
+
+
+async def resolve_for_capture(url):
+    """Até três tentativas só para falhas transitórias; mantém o diagnóstico."""
+    import requests
+    reason = ''
+    for attempt in range(3):
+        trace = []
+        try:
+            found = await asyncio.to_thread(resolve, url, trace.append)
+            if found:
+                return found, ''
+            reason = '; '.join(trace[-4:]) or 'Destino sem produto identificável.'
+            transient = any(re.match(r'HTTP (?:429|5\d\d)\b', item) for item in trace)
+        except requests.RequestException as error:
+            reason = 'Falha de rede: ' + type(error).__name__
+            transient = True
+        except Exception as error:
+            return None, 'Falha ao interpretar o link: ' + type(error).__name__
+        if not transient or attempt == 2:
+            break
+        await asyncio.sleep(attempt + 1)
+    return None, reason
+
 
 async def edited_messages(client, event):
     """Reúne o álbum da edição sem misturar legendas de outros produtos."""
@@ -100,7 +151,10 @@ async def main():
         media_dir = BASE / 'imagens_ofertas'
         media_dir.mkdir(exist_ok=True)
 
-        async def capture(messages, chat_id, chat):
+        revisions = CaptureRevisions()
+        capture_lock = asyncio.Lock()
+
+        async def capture_once(messages, chat_id, chat):
             if not chat or getattr(chat, 'noforwards', False) or any(getattr(m, 'noforwards', False) for m in messages):
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
@@ -114,13 +168,18 @@ async def main():
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
             products = {}
+            unresolved = []
             for url in urls:
-                try:
-                    p = await asyncio.to_thread(resolve, url)
-                    if p:
-                        products[p[0]] = p
-                except Exception:
-                    logging.warning('Não foi possível identificar um link na mensagem %s.', messages[0].id)
+                p, reason = await resolve_for_capture(url)
+                if p:
+                    products[p[0]] = p
+                else:
+                    unresolved.append(reason)
+            # Um segundo link não resolvido pode esconder outro produto.
+            if unresolved:
+                print('Ignorada: não foi possível resolver todos os links do produto.',
+                      chat_id, messages[0].id, '|', ' | '.join(dict.fromkeys(unresolved)))
+                return
             # Não associa uma única imagem/preço a vários produtos diferentes.
             if len(products) != 1:
                 if products:
@@ -158,6 +217,14 @@ async def main():
             print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
                   '| condição:', row['price_condition'] or 'nenhuma',
                   '| imagem:', bool(image), '| cupom:', row['coupon'] or 'não identificado')
+
+        async def capture(messages, chat_id, chat):
+            async with capture_lock:
+                key, digest = revisions.identity(messages, chat_id)
+                if revisions.unchanged(key, digest):
+                    return
+                await capture_once(messages, chat_id, chat)
+                revisions.remember(key, digest)
 
         @client.on(events.NewMessage(chats=selected))
         async def receive(event):
