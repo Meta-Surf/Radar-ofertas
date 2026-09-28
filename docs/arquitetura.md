@@ -1,3 +1,5 @@
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](../ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+
 # Arquitetura
 
 ## Fluxo Shopee e Telegram
@@ -25,3 +27,4 @@ A automação do GitHub executa somente testes com serviços simulados. Não nec
 ## Descoberta direta Shopee
 
 `radar_shopee.py` consulta produtos e substitui atomicamente `fila_shopee_api.jsonl`. O publicador lê ambas as filas e usa o mesmo registro diário. Ofertas da API são revalidadas antes da geração do link. Consulte [o guia do radar](radar-shopee.md).
+

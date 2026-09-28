@@ -1,0 +1,183 @@
+{
+  "Televisores": [
+    "Samsung",
+    "LG",
+    "TCL",
+    "Philips"
+  ],
+  "Monitores": [
+    "LG",
+    "Samsung",
+    "Dell",
+    "ASUS",
+    "AOC",
+    "BenQ",
+    "Gigabyte"
+  ],
+  "Processadores (CPU)": [
+    "AMD",
+    "Ryzen",
+    "Intel"
+  ],
+  "Placas de vídeo": [
+    "NVIDIA",
+    "GeForce",
+    "RTX",
+    "GTX",
+    "AMD",
+    "Radeon",
+    "Intel Arc",
+    "ASUS",
+    "MSI",
+    "Gigabyte",
+    "Galax",
+    "Zotac",
+    "Sapphire",
+    "PowerColor",
+    "ASRock",
+    "PNY"
+  ],
+  "Placas-mãe": [
+    "ASUS",
+    "MSI",
+    "Gigabyte",
+    "ASRock"
+  ],
+  "Memória RAM": [
+    "Kingston",
+    "Fury",
+    "Corsair",
+    "G.Skill",
+    "ADATA",
+    "XPG",
+    "TeamGroup"
+  ],
+  "SSDs": [
+    "Samsung",
+    "Kingston",
+    "WD",
+    "Western Digital",
+    "Crucial",
+    "Seagate",
+    "ADATA",
+    "XPG",
+    "SanDisk"
+  ],
+  "Fontes de alimentação": [
+    "Corsair",
+    "Seasonic",
+    "XPG",
+    "Cooler Master",
+    "MSI",
+    "Thermaltake"
+  ],
+  "Gabinetes": [
+    "Cooler Master",
+    "Corsair",
+    "DeepCool",
+    "Arctic",
+    "Noctua",
+    "Lian Li"
+  ],
+  "Notebooks": [
+    "Lenovo",
+    "Dell",
+    "ASUS",
+    "Acer",
+    "HP",
+    "Samsung",
+    "Apple",
+    "MacBook"
+  ],
+  "Smartphones": [
+    "Samsung",
+    "Apple",
+    "iPhone",
+    "Motorola",
+    "Xiaomi",
+    "Redmi",
+    "POCO",
+    "realme",
+    "Honor"
+  ],
+  "Tablets": [
+    "Samsung",
+    "Apple",
+    "iPad",
+    "Lenovo",
+    "Xiaomi"
+  ],
+  "Roteadores": [
+    "TP-Link",
+    "TP Link",
+    "ASUS",
+    "Huawei",
+    "D-Link",
+    "D Link",
+    "Intelbras"
+  ],
+  "Acessórios de informática": [
+    "Anker",
+    "Ugreen",
+    "Baseus",
+    "Belkin",
+    "Samsung",
+    "Apple"
+  ],
+  "Refrigeração": [
+    "Cooler Master",
+    "Corsair",
+    "DeepCool",
+    "Arctic",
+    "Noctua",
+    "Lian Li"
+  ],
+  "Carregadores": [
+    "Anker",
+    "Ugreen",
+    "Baseus",
+    "Belkin",
+    "Samsung",
+    "Apple"
+  ],
+  "Caixas de som": [
+    "JBL",
+    "Sony",
+    "Bose",
+    "Anker",
+    "Soundcore",
+    "Edifier",
+    "Sennheiser"
+  ],
+  "Fones de ouvido": [
+    "JBL",
+    "Sony",
+    "Bose",
+    "Anker",
+    "Soundcore",
+    "Edifier",
+    "Sennheiser",
+    "Logitech",
+    "Razer",
+    "HyperX",
+    "Corsair",
+    "SteelSeries",
+    "Keychron"
+  ],
+  "Mouses": [
+    "Logitech",
+    "Razer",
+    "HyperX",
+    "Corsair",
+    "SteelSeries",
+    "Keychron"
+  ],
+  "Teclados": [
+    "Logitech",
+    "Razer",
+    "HyperX",
+    "Corsair",
+    "SteelSeries",
+    "Keychron"
+  ]
+}

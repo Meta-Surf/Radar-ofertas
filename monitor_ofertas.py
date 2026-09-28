@@ -17,6 +17,17 @@ BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
 logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 
+async def edited_messages(client, event):
+    """Reúne o álbum da edição sem misturar legendas de outros produtos."""
+    message = event.message
+    if not message.grouped_id:
+        return [message]
+    nearby = await client.get_messages(await event.get_input_chat(),
+                                      ids=list(range(max(1, message.id - 10), message.id + 11)))
+    album = {m.id: m for m in nearby if m and m.grouped_id == message.grouped_id}
+    album[message.id] = message
+    return [album[key] for key in sorted(album)]
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--listar', action='store_true')
@@ -139,7 +150,7 @@ async def main():
                    'price_condition': captured_price.get('price_condition', ''),
                    'price_from': captured_price.get('price_from', False),
                    'coupon': coupon(text), 'image': image,
-                   'chat_id': chat_id, 'message_id': messages[0].id,
+                   'chat_id': chat_id, 'message_id': min(m.id for m in messages),
                    'captured_at': datetime.now(timezone.utc).isoformat(),
                    'source_date': messages[0].date.isoformat()}
             with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
@@ -156,6 +167,10 @@ async def main():
         @client.on(events.Album(chats=selected))
         async def album(event):
             await capture(event.messages, event.chat_id, await event.get_chat())
+
+        @client.on(events.MessageEdited(chats=selected))
+        async def edited(event):
+            await capture(await edited_messages(client, event), event.chat_id, await event.get_chat())
 
         print(f'Monitorando {len(set(selected))} chats. Ctrl+C para parar.')
         await client.run_until_disconnected()

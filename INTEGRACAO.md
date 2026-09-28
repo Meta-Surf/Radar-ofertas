@@ -1,3 +1,5 @@
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+
 # Cupons + grupos + radar Shopee
 
 ## Correção de preços captados nos grupos
@@ -102,3 +104,4 @@ As travas locais impedem duas instâncias novas do mesmo componente na mesma pas
 O monitor mostra `Monitorando ... chats` e `Oferta captada`. O radar mostra `Fila do radar atualizada`. O publicador mostra `Publicado ... origem: telegram` ou `origem: radar`. As filas são verificadas aproximadamente a cada segundo. Gerar o link e enviar depende das APIs: imediato significa sem espera programada de minutos. Uma oferta de grupo recebida durante uma requisição em andamento é processada quando ela termina. O radar pode esperar mais de dez minutos quando há ofertas de grupos pendentes. Se o Telegram rejeitar um envio e solicitar pausa, ela se aplica a ambas as fontes.
 
 Testes locais: `py -m unittest discover -p "test_*.py" -v`. Os testes usam dados simulados; login, acesso real aos grupos e APIs precisam ser conferidos no computador de execução.
+

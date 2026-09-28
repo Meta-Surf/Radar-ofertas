@@ -30,11 +30,15 @@ TEMAS = [
     ('Consoles', 'console videogame'),
     ('Smartwatches', 'smartwatch'),
     ('Acessórios de informática', 'hub usb'),
+    ('Refrigeração', 'cooler processador'),
+    ('Carregadores', 'carregador usb'),
 ]
 
 # Heurísticas de título: reduzem acessórios, mas não certificam modelo,
 # autenticidade, condição ou especificações. Não relaxar os filtros se faltar oferta.
 REGRAS_TEMA = {
+    'Refrigeração': (r'\b(cooler|water cooler|ventoinha|fan)\b', r'\b(cabo|suporte|parafuso|adaptador|notebook|placa de video)\b'),
+    'Carregadores': (r'\b(carregador|charger)\b', r'\b(cabo avulso|capa|suporte|bateria|placa|conector|kit)\b'),
     'Televisores': (r'\b(tv|televisor|televisao)\b',
                    r'\b(controle|suporte|antena|conversor|receptor|box|placa|tela|display|cabo|fonte|backlight)\b'),
     'Placas de vídeo': (r'\b(placa de video|gpu|geforce|radeon|rtx|gtx)\b',
@@ -94,7 +98,8 @@ def pertence_ao_tema(theme, offer):
 
 def score(offer):
     # Prioriza reputação e vendas; limita o peso do desconto informado.
-    return (40 * offer['rating'] / 5
+    from inteligencia_ofertas import brand_match
+    return (12 * brand_match(offer) + 40 * offer['rating'] / 5
             + 35 * min(math.log10(1 + offer['sales']) / 4, 1)
             + 25 * min(offer['discount'], 60) / 60)
 
@@ -117,9 +122,7 @@ def select(groups, limit, preserve_order=False):
 
 def publish_one(client, ledger, offer, token, channel, send):
     key = offer['product_id']
-    day = ledger.reserve(key)
-    if day is None:
-        return 'duplicada', None
+    day = None
     # Antes de enviar, falhas na preparação podem liberar a reserva.
     try:
         prepared = client.prepare(offer)
@@ -128,8 +131,14 @@ def publish_one(client, ledger, offer, token, channel, send):
         if not prepared.get('api_image'):
             raise ValueError('Oferta sem imagem')
     except Exception:
-        ledger.release(key, day)
         return 'revalidacao_falhou', None
+    from inteligencia_ofertas import Intelligence
+    intelligence = Intelligence(ledger.db)
+    prepared['tema_radar'] = offer.get('tema_radar')
+    prepared['history_badge'] = intelligence.badge(prepared, channel)
+    day = ledger.reserve(key, offer=prepared, channel=channel)
+    if day is None:
+        return 'duplicada', None
     try:
         message_id, _ = send(token, channel, prepared, prepared['api_image'])
     except Exception:
@@ -139,7 +148,7 @@ def publish_one(client, ledger, offer, token, channel, send):
         ledger.release(key, day)
         return 'rejeitada', None
     try:
-        ledger.finish(key, day, message_id)
+        ledger.finish(key, day, message_id, offer=prepared, channel=channel)
     except Exception:
         return 'enviada_registro_pendente', message_id
     return 'publicada', message_id
@@ -176,25 +185,22 @@ def run_round(args, parser):
             offers, scanned = collect(client, query, pages=2, minimum_discount=20,
                                       minimum_rating=4.5, minimum_sales=50)
         except Exception:
-            if args.enfileirar:
-                from radar_shopee import save_snapshot
-                save_snapshot([], base / 'fila_shopee_api.jsonl')
             parser.exit(1, f'Consulta falhou em {theme}. Nada foi enviado nesta rodada. Rode py radar_shopee.py --buscar "{query}" para diagnóstico.\n')
         aprovados_api = len(offers)
         offers = [dict(o, tema_radar=theme) for o in offers if pertence_ao_tema(theme, o)]
         print(f'{theme}: {scanned} consultados; {aprovados_api} aprovados nos filtros; {len(offers)} após filtro de tema.')
         groups.append((theme, offers))
         time.sleep(1)
-    # Retira publicadas e reservas incertas de qualquer data antes do ranking.
-    if args.publicar or args.enfileirar:
+    if args.enfileirar:
+        from inteligencia_ofertas import Intelligence
         registry = Ledger(base / 'publicacoes.sqlite3')
         try:
-            blocked = {row[0] for row in registry.db.execute(
-                'SELECT product FROM posts')}
+            intelligence = Intelligence(registry.db)
+            intelligence.enqueue([offer for _, offers in groups for offer in offers])
+            print(f'Fila persistente: {len(intelligence.pending(channel))} ofertas elegíveis; validade de 2 horas.')
         finally:
             registry.db.close()
-        groups = [(theme, [o for o in offers if o['product_id'] not in blocked])
-                  for theme, offers in groups]
+        return
     # Alterna prioridade entre temas; escolhe o melhor produto de cada tema.
     if args.loop:
         offset = args.round_index % len(TEMAS)
@@ -204,11 +210,6 @@ def run_round(args, parser):
         selected = select(chosen, args.limite, preserve_order=True)
     else:
         selected = select(groups, args.limite)
-    if args.enfileirar:
-        from radar_shopee import save_snapshot
-        save_snapshot([offer for _, offer in selected], base / 'fila_shopee_api.jsonl')
-        print(f'Fila do radar atualizada: {len(selected)} ofertas. Envio exclusivo pelo publicador unificado.')
-        return
     if not selected:
         print('Nenhuma oferta elegível. Nenhum envio realizado; filtros preservados.')
         return
@@ -296,3 +297,4 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         print('\nInterrompido. Se ocorreu durante envio, confira o canal antes de repetir.')
+

@@ -19,7 +19,7 @@ class GroupPriceTests(unittest.TestCase):
         with patch.object(client, 'generate_link', return_value='https://s.shopee.com.br/novo'), \
              patch.object(client, 'details', return_value={'productName': 'Zotac RTX 5060'}):
             rendered = caption(client.prepare(offer))
-        self.assertIn('R$ 2.391,00</b> — no app', rendered)
+        self.assertIn('R$ 2.391,00</b>\n\nno app', rendered)
         self.assertNotIn('WhatsApp', rendered)
 
     def test_common_formats(self):
@@ -28,6 +28,7 @@ class GroupPriceTests(unittest.TestCase):
             ('🔥 R$ 2.391,90 no Pix', '2.391,90', 'no Pix'),
             ('💸 **R$ 2.391,90** à vista', '2.391,90', 'à vista'),
             ('🤑 R$2391.90', '2.391,90', ''),
+            ('R$ 1,234', '1.234,00', ''),
             ('Preço: R$ 2391', '2.391,00', ''),
             ('Valor final: R$ 2391 no aplicativo', '2.391,00', 'no aplicativo'),
             ('Por: R$ 2391 usando o cupom TESTE10', '2.391,00', 'usando o cupom TESTE10'),
@@ -48,7 +49,7 @@ class GroupPriceTests(unittest.TestCase):
                      'Cashback de R$ 30', '10x de R$ 239,10', '10x por R$ 239,10',
                      'Frete:\nR$ 10', 'Cupom:\nR$ 20',
                      'R$ 20 por mês', 'Compras acima de R$ 100',
-                     'De R$ 3000', 'R$ 1,234', 'R$ 0,00']:
+                     'De R$ 3000', 'R$ 1,23,4', 'R$ 0,00']:
             with self.subTest(text=text):
                 self.assertIsNone(price(text))
 
@@ -72,3 +73,4 @@ class GroupPriceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

@@ -1,0 +1,13 @@
+Correção adicional: 💵2,943 agora é capturado como R$ 2.943,00.
+87 testes passaram com APIs simuladas, incluindo a mensagem enviada.
+
+Este pacote é cumulativo e inclui marcas, fila, histórico e banner.
+Se já instalou a atualização completa anterior, basta substituir ofertas_core.py
+e reiniciar monitor e publicador para carregar a correção.
+Se ainda não instalou, siga ATUALIZACAO_RADAR.md e aplique o pacote completo.
+Não apague bancos, sessões, .env ou filas. Nenhum envio real foi feito.
+
+Posts antigos e preços ausentes em filas antigas não são corrigidos automaticamente.
+A correção se aplica às novas capturas. O print mostra um post sem preço, mas não
+permite confirmar qual versão do publicador estava carregada no computador.
+A versão deste pacote bloqueia o envio de produtos sem preço identificado.

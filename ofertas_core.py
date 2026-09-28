@@ -195,10 +195,10 @@ def coupon(text):
 
 def price_info(text):
     """Extrai valor explícito e condição, sem calcular descontos ou parcelas."""
-    # Ponto separando milhares ou centavos; vírgula com dois centavos.
-    money = re.compile(r'R\s*\$\s*(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{2})?)(?![\d.,])', re.I)
+    # Aceita moeda ou emoji monetário explícito; milhares BR e US.
+    money = re.compile(r'(?:R\s*\$|[💵💰💸])\s*(?:R\s*\$\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{2})?)(?![\d.,])', re.I)
     candidates = []
-    clean_text = html.unescape(text).replace('\xa0', ' ').replace('\u200b', '')
+    clean_text = html.unescape(text).replace('\xa0', ' ').replace('\u200b', '').replace('\ufe0f', '')
     previous = ''
     for raw_line in clean_text.splitlines():
         # Valores riscados representam geralmente o preço anterior.
@@ -231,7 +231,10 @@ def price_info(text):
             if after and not re.match(r'(?:no\s+(?:app|aplicativo|pix|boleto|cart[aã]o)|via\s+pix|[àa]\s+vista|com\s+(?:o\s+)?cupom|usando\s+(?:o\s+)?cupom|aplicando\s+(?:o\s+)?cupom|em\s+at[eé]|no\s+pagamento|[!✅🔥💰💵💸🎉])', after, re.I):
                 continue
             value = match[1]
-            if ',' in value:
+            if re.fullmatch(r'\d{1,3}(?:,\d{3})+(?:\.\d{2})?', value):
+                whole, _, cents = value.replace(',', '').partition('.')
+                cents = cents or '00'
+            elif ',' in value:
                 whole, cents = value.replace('.', '').split(',')
             elif re.fullmatch(r'\d+\.\d{2}', value):
                 whole, cents = value.split('.')
@@ -262,11 +265,13 @@ def caption(offer):
     if offer.get('price'):
         prefix = 'a partir de ' if offer.get('price_from') else ''
         price_line = '💰 <b>' + prefix + 'R$ ' + html.escape(offer['price']) + '</b>'
-        if offer.get('source') == 'shopee_api':
-            price_line += ' (antes de cupons e descontos de pagamento)'
-        elif offer.get('price_condition'):
-            price_line += ' — ' + html.escape(str(offer['price_condition']))
         parts.append(price_line)
+        if offer.get('history_badge'):
+            parts.append(html.escape(offer['history_badge']))
+        if offer.get('source') == 'shopee_api':
+            parts.append('Antes de cupons e descontos de pagamento.')
+        elif offer.get('price_condition'):
+            parts.append(html.escape(str(offer['price_condition'])))
         if offer.get('source') == 'shopee_api':
             parts.append('🎟️ Confira cupons e possíveis descontos no Pix na página do produto.')
     if offer.get('coupon'):
@@ -293,14 +298,19 @@ class Ledger:
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (?, ?)', (clock_id, time.time() + interval))
 
-    def reserve(self, product_id, moment=None):
+    def reserve(self, product_id, moment=None, offer=None, channel=""):
+        from inteligencia_ofertas import Intelligence
+        intelligence = Intelligence(self.db)
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
         # Serializa a verificação e a reserva entre processos concorrentes.
         self.db.execute('BEGIN IMMEDIATE')
         try:
             # O produto é identificado pelo par loja/item. Publicações anteriores
-            # continuam bloqueadas depois da virada do dia e de reinícios.
-            if self.db.execute('SELECT 1 FROM posts WHERE product=? LIMIT 1', (product_id,)).fetchone():
+            # só são liberadas com queda comparável após 24h; resultados incertos ficam bloqueados.
+            if self.db.execute('SELECT 1 FROM posts WHERE product=? LIMIT 1', (product_id,)).fetchone() and (
+                    not offer or self.db.execute(
+                        "SELECT 1 FROM posts WHERE product=? AND status!='sent'", (product_id,)).fetchone()
+                    or not intelligence.can_repeat(offer, channel)):
                 self.db.commit()
                 return None
             result = self.db.execute('INSERT OR IGNORE INTO posts VALUES (?, ?, ?, NULL)', (product_id, day, 'sending'))
@@ -310,9 +320,13 @@ class Ledger:
             raise
         return day if result.rowcount else None
 
-    def finish(self, product_id, day, message_id):
+    def finish(self, product_id, day, message_id, offer=None, channel=""):
+        from inteligencia_ofertas import Intelligence
+        intelligence = Intelligence(self.db)
         with self.db:
             self.db.execute('UPDATE posts SET status=?, message_id=? WHERE product=? AND day=?', ('sent', message_id, product_id, day))
+            if offer and offer.get('kind') != 'coupon_alert':
+                intelligence.record(offer, channel, message_id)
 
     def release(self, product_id, day):
         with self.db:
