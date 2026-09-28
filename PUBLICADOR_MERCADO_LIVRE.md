@@ -1,5 +1,9 @@
 # Entrada manual Mercado Livre — grupo -1003988174916
 
+ATUALIZAÇÃO: agora mensagens somente com link podem ser completadas automaticamente.
+Instale instalar_ml_automatico.cmd e siga MERCADO_LIVRE_AUTOMATICO.md. O formato
+com dados explícitos abaixo continua aceito como alternativa.
+
 ## Instalar
 
 Pacote para a versão do Radar de Ofertas com as correções de 28/09/2026. Inclui
