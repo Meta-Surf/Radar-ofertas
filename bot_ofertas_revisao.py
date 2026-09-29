@@ -178,12 +178,14 @@ def run_publisher(args, parser):
                     continue
                 if age < -60 or age > max_age * 60:
                     continue
-                if is_ml_manual:
+                if is_ml_manual or is_ml_offer:
                     if time.monotonic() < retry_at.get(key, 0):
                         continue
-                    if not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
+                    if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         continue
-                    if not offer.get('name') or not valid_price(offer) or (require_photo and not (offer.get('api_image') or photo_path(offer))):
+                    needs_public_data = (not offer.get('name') or not valid_price(offer)
+                                         or (require_photo and not (offer.get('api_image') or photo_path(offer))))
+                    if needs_public_data:
                         try:
                             ready = auto_reader.read(offer, blocking=args.simular)
                             if ready is None:
