@@ -307,8 +307,37 @@ def browser_social_featured(page, current):
     if not social_page(current):
         return None
     try:
-        matches = page.locator('a, button').filter(
-            has_text=re.compile(r'^\s*Ir\s+para\s+(?:o\s+)?produto\s*    """Resolve o CTA renderizado do destaque do Perfil Social."""
+        controls = page.locator('a, button')
+        selected = []
+        for index in range(controls.count()):
+            control = controls.nth(index)
+            try:
+                label = re.sub(r'\\s+', ' ', control.inner_text()).strip().lower()
+            except Exception:
+                continue
+            if label in {'ir para produto', 'ir para o produto'}:
+                selected.append(control)
+        if len(selected) != 1:
+            raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
+        control = selected[0]
+        data = control.evaluate("""(el) => {
+            const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+            let node = el;
+            for (let level = 0; level < 9 && node; level++, node = node.parentElement) {
+                const titleEl = node.querySelector('.poly-component__title') || node.querySelector('[class*="title"]') || node.querySelector('h1, h2, h3');
+                const fractionEl = node.querySelector('.andes-money-amount__fraction') || node.querySelector('[class*="money-amount__fraction"]');
+                const centsEl = node.querySelector('.andes-money-amount__cents') || node.querySelector('[class*="money-amount__cents"]');
+                const currencyEl = node.querySelector('.andes-money-amount__currency-symbol') || node.querySelector('[class*="money-amount__currency-symbol"]');
+                const imgEl = node.querySelector('img');
+                const anchor = el.closest('a');
+                const href = anchor ? anchor.href : (el.href || null);
+                const title = titleEl ? clean(titleEl.textContent) : '';
+                const fraction = fractionEl ? clean(fractionEl.textContent) : '';
+                const cents = centsEl ? clean(centsEl.textContent) : '';
+                const currency = currencyEl ? clean(currencyEl.textContent) : '';
+                const image = imgEl ? (imgEl.currentSrc || imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                const text = clean(node.innerText);
+                if (href && title && fraction && (currency === 'R    """Resolve o CTA renderizado do destaque do Perfil Social."""
     if not social_page(current):
         return None
     try:
@@ -527,37 +556,7 @@ def main():
 
 if __name__ == '__main__':
     main()
-, re.I)
-        )
-        if matches.count() != 1:
-            raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
-        control = matches.first
-        data = control.evaluate("""(el) => {
-            const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-            let node = el;
-            for (let level = 0; level < 9 && node; level++, node = node.parentElement) {
-                const titleEl =
-                    node.querySelector('.poly-component__title') ||
-                    node.querySelector('[class*="title"]') ||
-                    node.querySelector('h1, h2, h3');
-                const fractionEl =
-                    node.querySelector('.andes-money-amount__fraction') ||
-                    node.querySelector('[class*="money-amount__fraction"]');
-                const centsEl =
-                    node.querySelector('.andes-money-amount__cents') ||
-                    node.querySelector('[class*="money-amount__cents"]');
-                const currencyEl =
-                    node.querySelector('.andes-money-amount__currency-symbol') ||
-                    node.querySelector('[class*="money-amount__currency-symbol"]');
-                const imgEl = node.querySelector('img');
-                const anchor = el.closest('a');
-                const href = anchor ? anchor.href : (el.href || null);
-                const title = titleEl ? clean(titleEl.textContent) : '';
-                const fraction = fractionEl ? clean(fractionEl.textContent) : '';
-                const cents = centsEl ? clean(centsEl.textContent) : '';
-                const currency = currencyEl ? clean(currencyEl.textContent) : '';
-                const image = imgEl ? (imgEl.currentSrc || imgEl.src || imgEl.getAttribute('data-src') || '') : '';
-                if (href && title && fraction && (currency === 'R    """Resolve o CTA renderizado do destaque do Perfil Social."""
+ || text.includes('R    """Resolve o CTA renderizado do destaque do Perfil Social."""
     if not social_page(current):
         return None
     try:
@@ -780,45 +779,35 @@ def main():
 
 if __name__ == '__main__':
     main()
- || /R\\$/.test(node.innerText || ''))) {
-                    return {href, title, fraction, cents, image, text: clean(node.innerText).slice(0, 800)};
+))) {
+                    return {href, title, fraction, cents, image, text: text.slice(0, 800)};
                 }
             }
             return null;
         }""")
         if not isinstance(data, dict):
             raise AffiliateError('Card em destaque do Perfil Social não pôde ser lido.')
-        target = data.get('href')
+        target = str(data.get('href') or '').strip()
         if not target or not allowed_link(target) or not identity(target):
             raise AffiliateError('Botão do destaque não aponta para um produto único do Mercado Livre.')
         title = str(data.get('title') or '').strip()
         if not title:
             raise AffiliateError('Título do produto em destaque não identificado.')
-        fraction = re.sub(r'\D', '', str(data.get('fraction') or ''))
-        cents = re.sub(r'\D', '', str(data.get('cents') or ''))
+        fraction = re.sub(r'\\D', '', str(data.get('fraction') or ''))
+        cents = re.sub(r'\\D', '', str(data.get('cents') or ''))
         if not fraction:
             raise AffiliateError('Preço do produto em destaque não identificado.')
         cents = (cents[:2] if cents else '00').ljust(2, '0')
         price = f'{int(fraction):,}'.replace(',', '.') + ',' + cents
-        image = str(data.get('image') or '').strip()
-        if not image:
-            raise AffiliateError('Imagem do produto em destaque não identificada.')
-        image = image_url(image)
-        return dict(
-            name=html.unescape(title),
-            price=price,
-            price_condition='Preço exibido no destaque do Perfil Social; confira as condições de pagamento.',
-            price_from=False,
-            api_image=image,
-            resolved_url=target,
-            auto_fetched_at=time.time(),
-            social_featured=True,
-        )
+        image = image_url(str(data.get('image') or '').strip())
+        return dict(name=html.unescape(title), price=price,
+                    price_condition='Preço exibido no destaque do Perfil Social; confira as condições de pagamento.',
+                    price_from=False, api_image=image, resolved_url=target,
+                    auto_fetched_at=time.time(), social_featured=True)
     except AffiliateError:
         raise
     except Exception:
         raise AffiliateError('Não foi possível ler o produto em destaque do Perfil Social.') from None
-
 
 def browser_social_destination(page, context, current):
     """Resolve o CTA renderizado do destaque do Perfil Social."""
