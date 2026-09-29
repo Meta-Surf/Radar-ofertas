@@ -300,6 +300,50 @@ def fetch_http(url, transport=None):
     raise AffiliateError('Limite de redirecionamentos ML atingido.')
 
 
+
+def browser_social_destination(page, context, current):
+    """Resolve o CTA renderizado do destaque do Perfil Social."""
+    if not social_page(current):
+        return None
+    try:
+        matches = page.locator('a, button').filter(
+            has_text=re.compile(r'^\s*Ir\s+para\s+(?:o\s+)?produto\s*$', re.I)
+        )
+        if matches.count() != 1:
+            raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
+        control = matches.first
+        href = control.get_attribute('href')
+        if not href:
+            try:
+                href = control.evaluate("(el) => { const a = el.closest('a'); return a ? a.href : null; }")
+            except Exception:
+                href = None
+        if href:
+            target = urljoin(current, href)
+            if not allowed_link(target):
+                raise AffiliateError('Botão do destaque aponta para domínio não permitido.')
+            return target
+
+        before = page.url
+        pages_before = list(context.pages)
+        control.click(timeout=5000)
+        try:
+            page.wait_for_load_state('domcontentloaded', timeout=10000)
+        except Exception:
+            pass
+        after = page.url
+        if after != before and allowed_link(after):
+            return after
+        for candidate_page in context.pages:
+            if candidate_page not in pages_before and allowed_link(candidate_page.url):
+                return candidate_page.url
+        raise AffiliateError('Botão "Ir para produto" não revelou um destino navegável.')
+    except AffiliateError:
+        raise
+    except Exception:
+        raise AffiliateError('Não foi possível resolver o botão "Ir para produto" do Perfil Social.') from None
+
+
 def fetch_browser(url):
     try:
         from playwright.sync_api import sync_playwright
@@ -361,6 +405,12 @@ def fetch_browser(url):
                     current, text = page.url, page.content()
                     if not allowed_link(current):
                         raise AffiliateError('Navegador saiu do domínio permitido.')
+                    if social_page(current):
+                        target = browser_social_destination(page, context, current)
+                        if not target:
+                            raise AffiliateError('Perfil Social sem produto em destaque identificável.')
+                        url = target
+                        continue
                     try:
                         return extract_product(text, current)
                     except AffiliateError:
