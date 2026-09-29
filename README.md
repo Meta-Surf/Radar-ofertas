@@ -13,7 +13,7 @@ Monitor de ofertas do Telegram e publicador de links de afiliado da Shopee. Incl
 | Publicador Shopee | Implementado; bloqueia envio sem link de afiliado gerado |
 | Imagens, cupons e duplicatas | Implementados com as limitações descritas em [docs/operacao.md](docs/operacao.md) |
 | Mercado Livre | OAuth e versões de radar incluídos; consultas a alguns itens apresentaram HTTP 403 |
-| Afiliados Mercado Livre | Radar v6 lê links já gerados de um arquivo local; não gera novos links automaticamente |
+| Afiliados Mercado Livre | Integração experimental pronta: gera short_url pela sessão autenticada do Link Builder; exige teste real local antes de habilitar |
 | Amazon, Instagram e WhatsApp | Integrações de publicação/afiliados pendentes |
 
 Este repositório preserva o código recebido em 25/09/2026. As versões anteriores do radar ficam em `archive/mercadolivre/`. A versão atual, `radar_mercadolivre_v6.py`, permanece na raiz. Elas não representam commits históricos: o histórico do Git começa na importação.
@@ -77,7 +77,7 @@ Para publicar automaticamente, execute sem `--simular`. A simulação consulta a
 - `radar_mercadolivre_v6.py`: monitor de anúncios/IDs configurados. Comece com `--probe ID_DO_ANUNCIO` ou `--dry-run`; mantenha `ML_MODO_TESTE=1` durante os testes.
 - Copie `examples/ml_itens.example.txt` para `ml_itens.txt` e `examples/ml_links_afiliados.example.json` para `ml_links_afiliados.json` para preencher seus dados localmente.
 
-A autenticação OAuth não garante acesso a todos os anúncios nem habilita uma API de geração de links de afiliado. O v6 pode usar um permalink comum quando falta um link no mapa local; portanto, ainda exige revisão antes de publicação comercial. Isso foi documentado, sem alterar o comportamento do código recebido.
+A autenticação OAuth continua separada da geração de afiliados. O fluxo integrado novo está em `mercadolivre_afiliados.py`: usa Cookie/X-CSRF-Token do Link Builder, bloqueia em caso de falha e nunca cai para link comum ou de terceiro. Veja [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md) antes do primeiro teste real.
 
 ## Testes
 

@@ -132,6 +132,19 @@ class AutoMLTests(unittest.TestCase):
                 auto.enrich(dict(row(), chat_id=-123))
             fetch.assert_not_called()
 
+    def test_third_party_ml_offer_may_read_public_metadata_but_preserves_group_price(self):
+        entry = dict(kind='ml_offer', source='telegram', chat_id=-123,
+                     product_id='MercadoLivre:123456',
+                     url='https://www.mercadolivre.com.br/camera/p/MLB123456',
+                     price='189,90', price_condition='no PIX', name='')
+        found = auto.extract_product(document(), DIRECT)
+        with patch.object(auto, 'fetch_http', return_value=found):
+            ready = auto.enrich(entry)
+        self.assertEqual(ready['price'], '189,90')
+        self.assertEqual(ready['price_condition'], 'no PIX')
+        self.assertEqual(ready['name'], DATA['name'])
+        self.assertEqual(ready['api_image'], IMAGE)
+
     def test_background_job_does_not_block_and_caches_result(self):
         future = Future(); executor = Mock(); executor.submit.return_value = future
         with patch.object(auto, 'ThreadPoolExecutor', return_value=executor):

@@ -249,9 +249,19 @@ def fetch_browser(url):
 
 
 def enrich(offer):
-    if (offer.get('kind') != 'ml_manual_offer' or not trusted(offer.get('chat_id'))
-            or not allowed_link(offer.get('url')) or offer.get('product_id') != key(offer['url'])):
-        raise AffiliateError('Origem manual ML não autorizada para leitura automática.')
+    manual = offer.get('kind') == 'ml_manual_offer'
+    automatic = offer.get('kind') == 'ml_offer' and offer.get('source') == 'telegram'
+    if manual:
+        authorized = (trusted(offer.get('chat_id')) and allowed_link(offer.get('url'))
+                      and offer.get('product_id') == key(offer['url']))
+    elif automatic:
+        identified = product(offer.get('url', ''))
+        authorized = bool(identified and identified[1] == 'Mercado Livre'
+                          and offer.get('product_id') == identified[0])
+    else:
+        authorized = False
+    if not authorized:
+        raise AffiliateError('Origem ML não autorizada para leitura automática.')
     try:
         found = fetch_http(offer['url'])
     except AffiliateError as http_error:
