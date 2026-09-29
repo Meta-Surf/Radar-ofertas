@@ -39,7 +39,7 @@ Pode substituir pelo link direto de outro produto Shopee. O comando imprime some
 
 ## Recuperação automática após reinício
 
-Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão as mensagens dos últimos 60 minutos. Isso cobre ofertas publicadas enquanto o computador, o monitor ou o `INICIAR_INTEGRADO.bat` estavam desligados.
+Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão as mensagens dos últimos 30 minutos. Isso cobre ofertas publicadas enquanto o computador, o monitor ou o `INICIAR_INTEGRADO.bat` estavam desligados.
 
 - `TG_RECUPERAR_MINUTOS=30` define a janela. Use `0` para desativar.
 - `TG_RECUPERAR_MAX_MENSAGENS=500` limita quantas mensagens recentes são consultadas por chat em cada inicialização.
