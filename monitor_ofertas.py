@@ -8,7 +8,7 @@ from collections import OrderedDict
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -46,6 +46,55 @@ class CaptureRevisions:
         self.seen.move_to_end(key)
         while len(self.seen) > self.limit:
             self.seen.popitem(last=False)
+
+
+def bounded_env_int(name, default, minimum, maximum):
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def queued_revision_digests(path):
+    """Reaproveita a própria fila para não duplicar a mesma revisão no reinício."""
+    result = {}
+    if not path.is_file():
+        return result
+    try:
+        with path.open(encoding='utf-8') as source:
+            for line in source:
+                try:
+                    row = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                digest = row.get('capture_digest')
+                chat_id, message_id = row.get('chat_id'), row.get('message_id')
+                if isinstance(digest, str) and digest and chat_id is not None and isinstance(message_id, int):
+                    result[(str(chat_id), message_id)] = digest
+    except OSError:
+        logging.warning('Não foi possível ler a fila para deduplicar a recuperação inicial.')
+    return result
+
+
+def load_monitor_state(path):
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def save_monitor_state(path, state):
+    """Estado operacional sem credenciais; gravação atômica para sobreviver a reinícios."""
+    try:
+        temp = path.with_suffix(path.suffix + '.tmp')
+        temp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+        temp.replace(path)
+    except OSError:
+        logging.warning('Não foi possível atualizar o estado local do monitor.')
 
 
 async def resolve_for_capture(url):
@@ -107,6 +156,7 @@ async def main():
         if not requested:
             parser.error('Preencha TG_CHATS com IDs negativos ou @nomes da lista.')
         selected = []
+        selected_dialogs = {}
         missing = []
         for value in requested:
             match = next((d for d in dialogs if str(d.id) == value or
@@ -118,11 +168,20 @@ async def main():
             if str(match.id) == os.getenv('TELEGRAM_CANAL', '') or ('@' + str(getattr(match.entity, 'username', '')).lower()) == os.getenv('TELEGRAM_CANAL', '').lower():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
+            selected_dialogs[match.id] = match
         if not selected:
             parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
         allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
+
+        requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 60, 0, 1440)
+        publisher_max_age = bounded_env_int('IDADE_MAXIMA_MINUTOS', 120, 1, 1440)
+        recovery_minutes = min(requested_recovery, publisher_max_age)
+        recovery_limit = bounded_env_int('TG_RECUPERAR_MAX_MENSAGENS', 500, 20, 2000)
+        recovery_state_path = BASE / 'monitor_recuperacao.json'
+        recovery_state = load_monitor_state(recovery_state_path)
+
         if args.diagnosticar:
             match = re.fullmatch(r'https://t\.me/([A-Za-z0-9_]+)/(\d+)/?', args.diagnosticar)
             if not match:
@@ -184,13 +243,14 @@ async def main():
         revisions = CaptureRevisions()
         capture_lock = asyncio.Lock()
 
-        async def capture_once(messages, chat_id, chat):
+        async def capture_once(messages, chat_id, chat, digest=None):
             if not chat or getattr(chat, 'noforwards', False) or any(getattr(m, 'noforwards', False) for m in messages):
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
             ml_alert = ml_manual.build_coupon(messages, chat_id)
             if ml_alert:
+                ml_alert = dict(ml_alert, capture_digest=digest)
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
                 print('Lista de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
@@ -210,6 +270,7 @@ async def main():
                             row['image'] = str(target.relative_to(BASE))
                     except Exception:
                         logging.warning('Imagem manual indisponível na mensagem %s.', photo.id)
+                row['capture_digest'] = digest
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
                 print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
@@ -218,6 +279,7 @@ async def main():
             if alerts:
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     for alert in alerts:
+                        alert = dict(alert, capture_digest=digest)
                         out.write(json.dumps(alert, ensure_ascii=False) + '\n')
                 print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
@@ -284,20 +346,96 @@ async def main():
                    'coupon': coupon(text), 'image': image,
                    'chat_id': chat_id, 'message_id': min(m.id for m in messages),
                    'captured_at': datetime.now(timezone.utc).isoformat(),
-                   'source_date': messages[0].date.isoformat()}
+                   'source_date': messages[0].date.isoformat(),
+                   'capture_digest': digest}
             with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                 out.write(json.dumps(row, ensure_ascii=False) + '\n')
             print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
                   '| condição:', row['price_condition'] or 'nenhuma',
                   '| imagem:', bool(image), '| cupom:', row['coupon'] or 'não identificado')
 
+        def remember_monitor_position(chat_id, messages):
+            if not messages:
+                return
+            key = str(chat_id)
+            previous = recovery_state.get(key) if isinstance(recovery_state.get(key), dict) else {}
+            last_id = max(int(previous.get('last_message_id', 0) or 0),
+                          max(m.id for m in messages))
+            activity = max((getattr(m, 'edit_date', None) or m.date for m in messages),
+                           default=datetime.now(timezone.utc))
+            recovery_state[key] = {
+                'last_message_id': last_id,
+                'last_activity_at': activity.isoformat(),
+                'checked_at': datetime.now(timezone.utc).isoformat(),
+            }
+            save_monitor_state(recovery_state_path, recovery_state)
+
         async def capture(messages, chat_id, chat):
             async with capture_lock:
                 key, digest = revisions.identity(messages, chat_id)
                 if revisions.unchanged(key, digest):
+                    remember_monitor_position(chat_id, messages)
                     return
-                await capture_once(messages, chat_id, chat)
+                await capture_once(messages, chat_id, chat, digest=digest)
                 revisions.remember(key, digest)
+                remember_monitor_position(chat_id, messages)
+
+        async def recover_recent_messages():
+            if recovery_minutes <= 0:
+                print('Recuperação inicial de mensagens: desativada por TG_RECUPERAR_MINUTOS=0.')
+                return
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=recovery_minutes)
+            queued = queued_revision_digests(BASE / 'fila_ofertas_v2.jsonl')
+            scanned = recovered = already_queued = failures = 0
+            print(f'Recuperando mensagens dos últimos {recovery_minutes} minutos '
+                  f'(até {recovery_limit} por chat)...')
+            for chat_id in dict.fromkeys(selected):
+                dialog = selected_dialogs.get(chat_id)
+                if not dialog:
+                    continue
+                recent = []
+                try:
+                    async for message in client.iter_messages(dialog.entity, limit=recovery_limit):
+                        if not message:
+                            continue
+                        stamp = getattr(message, 'date', None)
+                        if stamp and stamp < cutoff:
+                            break
+                        recent.append(message)
+                except Exception as error:
+                    failures += 1
+                    print('Recuperação inicial: falha ao consultar chat', chat_id,
+                          '|', type(error).__name__)
+                    continue
+
+                batches = OrderedDict()
+                for message in sorted(recent, key=lambda item: item.id):
+                    token = (('album', message.grouped_id) if getattr(message, 'grouped_id', None)
+                             else ('single', message.id))
+                    batches.setdefault(token, []).append(message)
+
+                scanned += len(batches)
+                for messages in batches.values():
+                    identity, digest = revisions.identity(messages, chat_id)
+                    queue_key = (str(chat_id), identity[1])
+                    if queued.get(queue_key) == digest:
+                        revisions.remember(identity, digest)
+                        remember_monitor_position(chat_id, messages)
+                        already_queued += 1
+                        continue
+                    try:
+                        await capture(messages, chat_id, dialog.entity)
+                        recovered += 1
+                    except Exception as error:
+                        failures += 1
+                        print('Recuperação inicial: falha ao reprocessar mensagem',
+                              identity[1], 'do chat', chat_id, '|', type(error).__name__)
+
+            print('Recuperação inicial concluída:',
+                  recovered, 'lotes reprocessados,',
+                  already_queued, 'já presentes na fila,',
+                  scanned, 'lotes examinados' +
+                  (f', {failures} falhas isoladas.' if failures else '.'))
 
         @client.on(events.NewMessage(chats=selected))
         async def receive(event):
@@ -312,6 +450,7 @@ async def main():
         async def edited(event):
             await capture(await edited_messages(client, event), event.chat_id, await event.get_chat())
 
+        await recover_recent_messages()
         print(f'Monitorando {len(set(selected))} chats. Ctrl+C para parar.')
         await client.run_until_disconnected()
     finally:
