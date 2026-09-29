@@ -95,17 +95,35 @@ def build_alert(messages, chat_id):
 
 def alert_caption(alert):
     text = clean_text(alert['text'])
-    lines = []
-    for line in text.splitlines():
-        if not line.strip():
+    source_lines = [line for line in text.splitlines() if line.strip()]
+    parts = ['🔥 <b>Cupom Mercado Livre</b>']
+
+    start = 0
+    if source_lines:
+        heading = re.sub(r'^[^\w]+', '', source_lines[0]).strip()
+        if re.fullmatch(r'mercado\s+livre[ !:—-]*', heading, re.I):
+            start = 1
+        else:
+            selected = re.fullmatch(r'mercado\s+livre\s+em selecionados[ !:—-]*', heading, re.I)
+            if selected:
+                start = 1
+                parts.append('Em selecionados!')
+            elif (re.search(r'\b(?:cupom|cupons)\b', heading, re.I)
+                  and re.search(r'\bmercado\s+livre\b', heading, re.I)):
+                start = 1
+
+    for line in source_lines[start:]:
+        if re.fullmatch(r'#?an[uú]ncio', line.strip(), re.I):
             continue
         match = CODE.search(line)
         if match:
-            lines.append(html.escape(line[:match.start(1)]) + '<code>' + html.escape(match[1]) + '</code>')
+            parts.append(html.escape(line[:match.start(1)]) + '<code>' + html.escape(match[1]) + '</code>')
         else:
-            lines.append(html.escape(line))
-    lines.append('Resgate aqui:\n' + html.escape(social_url()))
-    return '\n\n'.join(lines)
+            parts.append(html.escape(line))
+
+    parts.append('#anuncio')
+    parts.append('Resgate aqui:\n' + html.escape(social_url()))
+    return '\n\n'.join(parts)
 
 
 def visible_length(text):

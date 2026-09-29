@@ -111,7 +111,11 @@ class CouponTests(unittest.TestCase):
             self.assertEqual(coupons.send_alert('fake', '@fake', ready), (42, 0))
             data = post.call_args.kwargs['data']
             self.assertIn('&lt;', data['text'])
-            self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'][0][0]['url'], 'https://s.shopee.com.br/novo')
+            self.assertIn('🔥 <b>Cupom Shopee</b>', data['text'])
+            self.assertIn('#anuncio', data['text'])
+            self.assertIn('Resgate aqui:', data['text'])
+            self.assertIn('https://s.shopee.com.br/novo', data['text'])
+            self.assertNotIn('reply_markup', data)
 
     def test_no_send_without_generated_flag(self):
         with patch('requests.post') as post:

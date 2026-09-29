@@ -21,7 +21,7 @@ class BannerTests(unittest.TestCase):
             with patch.dict(os.environ, {'CUPONS_BANNER': str(p)}):
                 self.assertEqual(coupons.banner_path(BASE), p)
 
-    def test_banner_upload_and_affiliate_buttons(self):
+    def test_banner_upload_and_affiliate_link_in_text(self):
         alert = {'affiliate_generated': True, 'entries': [
             {'conditions': 'R$ 30 OFF acima de R$ 169',
              'affiliate_url': 'https://s.shopee.com.br/novo'}]}
@@ -32,8 +32,9 @@ class BannerTests(unittest.TestCase):
             self.assertEqual(kwargs['files']['photo'][1].read(),
                              (BASE / 'assets/banner_cupons.png').read_bytes())
             self.assertIn('R$ 30 OFF acima de R$ 169', kwargs['data']['caption'])
-            self.assertEqual(json.loads(kwargs['data']['reply_markup'])['inline_keyboard'][0][0]['url'],
-                             alert['entries'][0]['affiliate_url'])
+            self.assertIn('Resgate aqui:', kwargs['data']['caption'])
+            self.assertIn(alert['entries'][0]['affiliate_url'], kwargs['data']['caption'])
+            self.assertNotIn('reply_markup', kwargs['data'])
             return response
         with patch('requests.post', side_effect=sent) as post:
             self.assertEqual(coupons.send_alert('fake', '@fake', alert, coupons.banner_path(BASE)), (42, 0))

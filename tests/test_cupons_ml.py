@@ -37,6 +37,10 @@ class MLCouponTests(unittest.TestCase):
                 row = ml.prepare_alert(build(text))
                 self.assertEqual([i['code'] for i in row['entries']], [v[0] for v in VALUES])
                 rendered = ml.alert_caption(row)
+                self.assertIn('🔥 <b>Cupom Mercado Livre</b>', rendered)
+                self.assertIn('#anuncio', rendered)
+                self.assertIn('Resgate aqui:', rendered)
+                self.assertEqual(rendered.count(ml.DEFAULT_SOCIAL_URL), 1)
                 for code, pct, minimum, maximum in VALUES:
                     self.assertIn('<code>' + code + '</code>', rendered)
                 self.assertNotIn('meli.la', rendered)
