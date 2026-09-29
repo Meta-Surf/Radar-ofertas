@@ -175,7 +175,7 @@ async def main():
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
 
-        requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 60, 0, 1440)
+        requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 30, 0, 1440)
         publisher_max_age = bounded_env_int('IDADE_MAXIMA_MINUTOS', 120, 1, 1440)
         recovery_minutes = min(requested_recovery, publisher_max_age)
         recovery_limit = bounded_env_int('TG_RECUPERAR_MAX_MENSAGENS', 500, 20, 2000)
@@ -243,14 +243,14 @@ async def main():
         revisions = CaptureRevisions()
         capture_lock = asyncio.Lock()
 
-        async def capture_once(messages, chat_id, chat, digest=None):
+        async def capture_once(messages, chat_id, chat, digest=None, recovered=False):
             if not chat or getattr(chat, 'noforwards', False) or any(getattr(m, 'noforwards', False) for m in messages):
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
             ml_alert = ml_manual.build_coupon(messages, chat_id)
             if ml_alert:
-                ml_alert = dict(ml_alert, capture_digest=digest)
+                ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered)
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
                 print('Lista de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
@@ -271,6 +271,7 @@ async def main():
                     except Exception:
                         logging.warning('Imagem manual indisponível na mensagem %s.', photo.id)
                 row['capture_digest'] = digest
+                row['recovered'] = recovered
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
                 print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
@@ -279,7 +280,7 @@ async def main():
             if alerts:
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     for alert in alerts:
-                        alert = dict(alert, capture_digest=digest)
+                        alert = dict(alert, capture_digest=digest, recovered=recovered)
                         out.write(json.dumps(alert, ensure_ascii=False) + '\n')
                 print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
@@ -347,7 +348,8 @@ async def main():
                    'chat_id': chat_id, 'message_id': min(m.id for m in messages),
                    'captured_at': datetime.now(timezone.utc).isoformat(),
                    'source_date': messages[0].date.isoformat(),
-                   'capture_digest': digest}
+                   'capture_digest': digest,
+                   'recovered': recovered}
             with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                 out.write(json.dumps(row, ensure_ascii=False) + '\n')
             print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
@@ -370,13 +372,13 @@ async def main():
             }
             save_monitor_state(recovery_state_path, recovery_state)
 
-        async def capture(messages, chat_id, chat):
+        async def capture(messages, chat_id, chat, recovered=False):
             async with capture_lock:
                 key, digest = revisions.identity(messages, chat_id)
                 if revisions.unchanged(key, digest):
                     remember_monitor_position(chat_id, messages)
                     return
-                await capture_once(messages, chat_id, chat, digest=digest)
+                await capture_once(messages, chat_id, chat, digest=digest, recovered=recovered)
                 revisions.remember(key, digest)
                 remember_monitor_position(chat_id, messages)
 
@@ -424,7 +426,7 @@ async def main():
                         already_queued += 1
                         continue
                     try:
-                        await capture(messages, chat_id, dialog.entity)
+                        await capture(messages, chat_id, dialog.entity, recovered=True)
                         recovered += 1
                     except Exception as error:
                         failures += 1
