@@ -138,12 +138,23 @@ def prepare_alert(client, alert):
     return output
 
 def alert_caption(alert):
-    parts = ['🎟️ <b>ALERTA DE CUPONS SHOPEE</b>']
+    parts = ['🔥 <b>Cupom Shopee</b>']
+    links = []
     for index, entry in enumerate(alert['entries'], 1):
-        parts.append('<b>Opção ' + str(index) + '</b>' +
-                     ('\n' + html.escape(entry['conditions']) if entry.get('conditions') else '\nConfira os cupons no link abaixo.'))
+        parts.append('<b>🎟️ Opção ' + str(index) + '</b>' +
+                     ('\n' + html.escape(entry['conditions']) if entry.get('conditions') else '\nConfira os cupons disponíveis.'))
+        link = entry.get('affiliate_url')
+        if isinstance(link, str) and link:
+            links.append((index, link))
     parts.append('Confira validade, disponibilidade e regras de cada cupom na Shopee.')
-    parts.append('(ANÚNCIO)')
+    parts.append('#anuncio')
+    if links:
+        if len(links) == 1:
+            rescue = html.escape(links[0][1])
+        else:
+            rescue = '\n'.join('Opção ' + str(index) + ': ' + html.escape(url)
+                               for index, url in links)
+        parts.append('Resgate aqui:\n' + rescue)
     return '\n\n'.join(parts)
 
 def banner_path(base):
@@ -175,10 +186,7 @@ def send_alert(token, channel, alert, image=None):
     # Nunca corta condições para caber na legenda de uma foto.
     image = image if len(text.encode('utf-16-le')) // 2 <= 1024 else None
     data = {'chat_id': channel, 'parse_mode': 'HTML',
-            'caption' if image else 'text': text,
-            'reply_markup': json.dumps({'inline_keyboard': [
-                [{'text': '🎟️ ACESSAR OPÇÃO ' + str(i), 'url': e['affiliate_url']}]
-                for i, e in enumerate(entries, 1)]})}
+            'caption' if image else 'text': text}
     method = 'sendPhoto' if image else 'sendMessage'
     endpoint = f'https://api.telegram.org/bot{token}/{method}'
     if image:
