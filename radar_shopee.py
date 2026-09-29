@@ -35,7 +35,7 @@ def active(node, now):
         return False
 
 
-def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, now=None):
+def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, minimum_price=0, now=None):
     now = time.time() if now is None else now
     try:
         shop, item = str(node['shopId']), str(node['itemId'])
@@ -43,7 +43,7 @@ def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, n
             return None
         low, high = number(node['priceMin']), number(node['priceMax'])
         discount, rating, sales = number(node['priceDiscountRate']), number(node['ratingStar']), number(node['sales'])
-        if (not active(node, now) or not 0 < low <= high or
+        if (not active(node, now) or not 0 < low <= high or low < number(minimum_price) or
                 not number(minimum_discount) <= discount <= 100 or
                 not number(minimum_rating) <= rating <= 5 or sales < number(minimum_sales) or
                 not valid_image_url(node.get('imageUrl')) or not node.get('productName')):
@@ -57,7 +57,7 @@ def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, n
                 'api_image': node['imageUrl'], 'image': None, 'coupon': None,
                 'source': 'shopee_api', 'captured_at': stamp, 'source_date': stamp,
                 'filter_discount': minimum_discount, 'filter_rating': minimum_rating,
-                'filter_sales': minimum_sales}
+                'filter_sales': minimum_sales, 'filter_price_min': minimum_price}
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return None
 
@@ -70,7 +70,7 @@ def connection(client, operation, args, fields):
     return result
 
 
-def collect(client, keyword='', pages=2, minimum_discount=20, minimum_rating=4.5, minimum_sales=50):
+def collect(client, keyword='', pages=2, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, minimum_price=0):
     found, scanned = {}, 0
     for page in range(1, pages + 1):
         args = f'page: {page}, limit: 20, sortType: 2'
@@ -81,7 +81,7 @@ def collect(client, keyword='', pages=2, minimum_discount=20, minimum_rating=4.5
             scanned += 1
             if not isinstance(node, dict):
                 continue
-            offer = candidate(node, minimum_discount, minimum_rating, minimum_sales)
+            offer = candidate(node, minimum_discount, minimum_rating, minimum_sales, minimum_price)
             if offer:
                 found[offer['product_id']] = offer
         if not (result.get('pageInfo') or {}).get('hasNextPage'):
@@ -100,10 +100,12 @@ def refresh(client, offer):
             continue
         if str(node.get('shopId')) == shop and str(node.get('itemId')) == item:
             updated = candidate(node, offer.get('filter_discount', 20),
-                                offer.get('filter_rating', 4.5), offer.get('filter_sales', 50))
+                                offer.get('filter_rating', 4.5), offer.get('filter_sales', 50),
+                                offer.get('filter_price_min', 0))
             if updated:
-                if offer.get('tema_radar'):
-                    updated['tema_radar'] = offer['tema_radar']
+                for key, value in offer.items():
+                    if key == 'tema_radar' or key.startswith('radar_'):
+                        updated[key] = value
                 return updated
     raise AffiliateError('Oferta Shopee indisponível ou fora dos filtros na revalidação; envio bloqueado.')
 
@@ -131,6 +133,7 @@ def main():
     parser.add_argument('--desconto-min', type=float, default=20)
     parser.add_argument('--nota-min', type=float, default=4.5)
     parser.add_argument('--vendas-min', type=int, default=50)
+    parser.add_argument('--preco-min', type=float, default=0, help='Preço mínimo do produto em reais.')
     parser.add_argument('--paginas', type=int, default=2)
     parser.add_argument('--enfileirar', action='store_true', help='Disponibiliza ofertas ao publicador ativo.')
     parser.add_argument('--loop', action='store_true', help='Repete a consulta até Ctrl+C.')
@@ -138,8 +141,8 @@ def main():
     parser.add_argument('--campanhas', action='store_true', help='Mostra campanhas ativas, sem publicar ou validar cupons.')
     args = parser.parse_args()
     if not (0 <= args.desconto_min <= 100 and 0 <= args.nota_min <= 5 and args.vendas_min >= 0
-            and 1 <= args.paginas <= 10 and args.intervalo >= 300):
-        parser.error('Use desconto 0–100, nota 0–5, vendas >= 0, páginas 1–10 e intervalo >= 300.')
+            and args.preco_min >= 0 and 1 <= args.paginas <= 10 and args.intervalo >= 300):
+        parser.error('Use desconto 0–100, nota 0–5, vendas/preço >= 0, páginas 1–10 e intervalo >= 300.')
     if args.campanhas and (args.enfileirar or args.loop):
         parser.error('--campanhas é uma consulta única, sem enfileiramento.')
     try:
@@ -157,7 +160,7 @@ def main():
         print('Modo fila: o publicador ativo poderá publicar.' if args.enfileirar else 'Prévia: nenhuma fila será alterada e nada será publicado.')
         while True:
             try:
-                offers, scanned = collect(client, args.buscar, args.paginas, args.desconto_min, args.nota_min, args.vendas_min)
+                offers, scanned = collect(client, args.buscar, args.paginas, args.desconto_min, args.nota_min, args.vendas_min, args.preco_min)
                 print(f'Consultados: {scanned} | Aprovados nos filtros: {len(offers)}')
                 for offer in offers:
                     prefix = 'a partir de ' if offer['price_from'] else ''
