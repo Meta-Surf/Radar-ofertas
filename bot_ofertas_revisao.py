@@ -193,7 +193,7 @@ def run_publisher(args, parser):
                         continue
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         continue
-                    needs_public_data = (not offer.get('name') or not valid_price(offer)
+                    needs_public_data = (is_ml_pending or not offer.get('name') or not valid_price(offer)
                                          or (require_photo and not (offer.get('api_image') or photo_path(offer))))
                     if needs_public_data:
                         try:
