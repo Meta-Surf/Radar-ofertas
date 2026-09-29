@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
 import requests
 from mercadolivre_manual import allowed_link, trusted, key
@@ -49,10 +49,14 @@ class Page(HTMLParser):
             self.links.append(a['href'])
         if tag == 'link' and a.get('rel') == 'canonical' and a.get('href'):
             self.canonical.append(a['href'])
-        if tag == 'meta' and a.get('http-equiv', '').lower() == 'refresh':
-            match = re.search(r'url\s*=\s*[\"\']?([^\"\']+)', a.get('content', ''), re.I)
-            if match:
-                self.refresh.append(html.unescape(match[1].strip()))
+        if tag == 'meta':
+            label = (a.get('property') or a.get('name') or '').lower()
+            if label in ('og:url', 'al:web:url') and a.get('content'):
+                self.canonical.append(a['content'])
+            if a.get('http-equiv', '').lower() == 'refresh':
+                match = re.search(r'url\s*=\s*[\"\']?([^\"\']+)', a.get('content', ''), re.I)
+                if match:
+                    self.refresh.append(html.unescape(match[1].strip()))
 
     def handle_data(self, data):
         if self._json is not None:
@@ -163,16 +167,35 @@ def extract_product(text, url):
                 auto_fetched_at=time.time())
 
 
+
+def nested_official_urls(url):
+    """Extrai somente URLs HTTPS do próprio ecossistema ML embutidas em parâmetros."""
+    try:
+        query = parse_qs(urlsplit(url).query)
+    except (ValueError, TypeError):
+        return []
+    values = []
+    for items in query.values():
+        for value in items:
+            candidate = html.unescape(unquote(str(value))).strip()
+            if candidate.startswith('//'):
+                candidate = 'https:' + candidate
+            if candidate.startswith('https://') and allowed_link(candidate):
+                values.append(candidate)
+    return list(dict.fromkeys(values))
+
+
 def next_destination(text, current):
     page = Page(text)
     redirects = list(dict.fromkeys(urljoin(current, x) for x in page.refresh))
     if len(redirects) == 1 and allowed_link(redirects[0]):
         return redirects[0]
-    # Nunca segue recomendação de uma página de produto cujo preço não foi lido.
-    if identity(current):
+    # Uma página de produto direta não deve trocar para recomendações.
+    direct = product(current) or re.search(r'/up/MLBU\d+(?:/|$)', urlsplit(current).path, re.I)
+    if direct:
         return None
     candidates = {}
-    for link in page.canonical + page.links:
+    for link in nested_official_urls(current) + page.canonical + page.links:
         target = urljoin(current, link)
         found = identity(target)
         if found:
@@ -182,19 +205,37 @@ def next_destination(text, current):
     return None
 
 
+
+def http_transport(transport=None):
+    if transport is not None:
+        return transport
+    session = requests.Session()
+    cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+    for piece in cookie.split(';'):
+        if '=' not in piece:
+            continue
+        name, value = piece.strip().split('=', 1)
+        if name:
+            session.cookies.set(name, value)
+    return session
+
+
 def fetch_http(url, transport=None):
-    transport = transport or requests
+    transport = http_transport(transport)
+    headers = request_headers()
+    if isinstance(transport, requests.Session):
+        headers.pop('Cookie', None)
     seen = set()
     for _ in range(7):
         if not allowed_link(url):
             host = urlsplit(url).hostname or 'inválido'
             raise AffiliateError(f'Redirecionamento ML para domínio não permitido: {host}.')
         if url in seen:
-            raise AffiliateError('Redirecionamento ML circular.')
+            raise AffiliateError('Redirecionamento ML circular após atualização de sessão.')
         seen.add(url)
         try:
             with transport.get(url, allow_redirects=False, stream=True, timeout=(5, 10),
-                               headers=request_headers()) as r:
+                               headers=headers) as r:
                 if r.status_code in (301, 302, 303, 307, 308):
                     destination = r.headers.get('Location')
                     if not destination:
