@@ -321,6 +321,70 @@ def fetch_http(url, transport=None):
 
 
 
+_SOCIAL_MONEY_RE = re.compile(
+    r'R\$\s*(?P<integer>\d{1,3}(?:\.\d{3})*|\d+)(?:,(?P<cents>\d{2}))?',
+    re.I,
+)
+
+
+def _social_money_value(match):
+    integer = re.sub(r'\D', '', match.group('integer') or '')
+    cents = match.group('cents') or '00'
+    if not integer or int(integer) <= 0:
+        raise AffiliateError('Preço do produto em destaque inválido.')
+    return f'{int(integer):,}'.replace(',', '.') + ',' + cents
+
+
+def _social_discount_prices(text):
+    """Valores explicitamente ligados a "% OFF", excluindo descontos de saldo/cupom."""
+    clean = re.sub(r'\s+', ' ', html.unescape(str(text or ''))).strip()
+    found = []
+    for match in _SOCIAL_MONEY_RE.finditer(clean):
+        suffix = clean[match.end():match.end() + 120]
+        discount = re.match(r'\s*\d+(?:[.,]\d+)?\s*%\s*OFF\b', suffix, re.I)
+        if not discount:
+            continue
+        tail = suffix[discount.end():discount.end() + 80]
+        if re.match(r'\s*(?:com\s+saldo|com\s+cupom|cupom\b)', tail, re.I):
+            continue
+        found.append(_social_money_value(match))
+    return list(dict.fromkeys(found))
+
+
+def _social_non_installment_prices(text):
+    """Lê somente valores explícitos do bloco atual, descartando parcela/cupom."""
+    clean = re.sub(r'\s+', ' ', html.unescape(str(text or ''))).strip()
+    found = []
+    for match in _SOCIAL_MONEY_RE.finditer(clean):
+        before = clean[max(0, match.start() - 50):match.start()]
+        after = clean[match.end():match.end() + 100]
+        if re.search(r'(?:\b\d+\s*x|\bem\s+\d+\s*x)\s*\Z', before, re.I):
+            continue
+        if re.match(r'\s*\d+(?:[.,]\d+)?\s*%\s*OFF\s+(?:com\s+saldo|com\s+cupom)', after, re.I):
+            continue
+        if re.search(r'(?:cupom|saldo no mercado pago)\s*\Z', before, re.I):
+            continue
+        found.append(_social_money_value(match))
+    return list(dict.fromkeys(found))
+
+
+def social_featured_price(current_text, card_text):
+    """Preço principal explícito do card Social; nunca usa valor de parcela."""
+    for source in (current_text, card_text):
+        candidates = _social_discount_prices(source)
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise AffiliateError('Mais de um preço principal com desconto foi encontrado no destaque.')
+
+    candidates = _social_non_installment_prices(current_text)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise AffiliateError('Bloco de preço atual ambíguo no destaque do Perfil Social.')
+    raise AffiliateError('Preço principal do produto em destaque não identificado com segurança.')
+
+
 def browser_social_featured(page, current):
     """Lê o card principal do Perfil Social sem navegar até o produto."""
     if not social_page(current):
@@ -353,7 +417,10 @@ def browser_social_featured(page, current):
                 const href = anchor ? anchor.href : (el.href || null);
                 const title = titleEl ? clean(titleEl.textContent) : '';
 
-                const currentPriceBlock = node.querySelector('.poly-price__current');
+                const currentPriceBlock =
+                    node.querySelector('.poly-price__current') ||
+                    node.querySelector('[class*="price__current"]') ||
+                    node.querySelector('[class*="price-current"]');
                 const currentAmount = currentPriceBlock
                     ? currentPriceBlock.querySelector('.andes-money-amount:not(.andes-money-amount--previous)')
                     : null;
@@ -365,6 +432,10 @@ def browser_social_featured(page, current):
                     : null;
                 const fraction = fractionEl ? clean(fractionEl.textContent) : '';
                 const cents = centsEl ? clean(centsEl.textContent) : '';
+                const currentPriceText = currentPriceBlock
+                    ? clean(currentPriceBlock.innerText || currentPriceBlock.textContent)
+                    : '';
+                const cardText = clean(node.innerText || node.textContent);
 
                 const imageCandidates = [];
                 for (const imgEl of node.querySelectorAll('img')) {
@@ -394,12 +465,15 @@ def browser_social_featured(page, current):
                     }
                 }
 
-                if (href && title && fraction && imageCandidates.length) {
+                if (href && title && imageCandidates.length &&
+                        (currentPriceText || fraction || cardText)) {
                     return {
                         href,
                         title,
                         fraction,
                         cents,
+                        currentPriceText,
+                        cardText,
                         imageCandidates
                     };
                 }
@@ -415,12 +489,16 @@ def browser_social_featured(page, current):
         title = str(data.get('title') or '').strip()
         if not title:
             raise AffiliateError('Título do produto em destaque não identificado.')
-        fraction = re.sub(r'\\D', '', str(data.get('fraction') or ''))
-        cents = re.sub(r'\\D', '', str(data.get('cents') or ''))
-        if not fraction:
-            raise AffiliateError('Preço do produto em destaque não identificado.')
-        cents = (cents[:2] if cents else '00').ljust(2, '0')
-        price = f'{int(fraction):,}'.replace(',', '.') + ',' + cents
+        if 'currentPriceText' in data or 'cardText' in data:
+            price = social_featured_price(
+                data.get('currentPriceText', ''), data.get('cardText', ''))
+        else:
+            fraction = re.sub(r'\\D', '', str(data.get('fraction') or ''))
+            cents = re.sub(r'\\D', '', str(data.get('cents') or ''))
+            if not fraction:
+                raise AffiliateError('Preço do produto em destaque não identificado.')
+            cents = (cents[:2] if cents else '00').ljust(2, '0')
+            price = f'{int(fraction):,}'.replace(',', '.') + ',' + cents
         image = social_image_url(data.get('imageCandidates') or data.get('image') or [])
         return dict(name=html.unescape(title), price=price,
                     price_condition='Preço exibido no destaque do Perfil Social; confira as condições de pagamento.',
