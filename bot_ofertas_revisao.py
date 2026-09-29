@@ -10,6 +10,7 @@ import requests
 from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
+from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as valid_ml_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
 import mercadolivre_manual as ml_manual
@@ -65,7 +66,12 @@ def send(token, channel, offer, image):
         raise AffiliateError('Publicação bloqueada: preço ausente ou inválido.')
     if offer.get('kind') == 'ml_manual_offer':
         offer = ml_manual.prepare(offer)
-    elif not offer.get('affiliate_generated') or not valid_affiliate_url(offer.get('affiliate_url')):
+    elif not offer.get('affiliate_generated'):
+        raise AffiliateError('Publicação bloqueada: falta link de afiliado gerado.')
+    elif offer.get('store') == 'Mercado Livre':
+        if not valid_ml_affiliate_url(offer.get('affiliate_url')):
+            raise AffiliateError('Publicação bloqueada: link de afiliado Mercado Livre inválido.')
+    elif not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
     if len(caption(offer).encode('utf-16-le')) // 2 > 1024:
         image = None
@@ -114,7 +120,12 @@ def run_publisher(args, parser):
         affiliate = ShopeeAffiliate.from_env()
     except AffiliateError as e:
         affiliate = None
-        print("Shopee indisponível:", str(e), "| Entrada manual e cupons Mercado Livre continuam habilitados.")
+        print("Shopee indisponível:", str(e), "| Mercado Livre e entrada manual continuam independentes.")
+    try:
+        ml_affiliate = MercadoLivreAffiliate.from_env()
+    except AffiliateError as e:
+        ml_affiliate = None
+        print("Afiliados Mercado Livre indisponível:", str(e), "| links automáticos ML ficarão bloqueados.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 600  # Intervalo exclusivo das publicações originadas no radar.
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
@@ -126,7 +137,7 @@ def run_publisher(args, parser):
     prepared_coupons = {}
     from mercadolivre_auto import AutoReader
     auto_reader = AutoReader()
-    print('Simulação com API Shopee: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee e listas de cupons. Ctrl+C para parar.')
+    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre e listas de cupons. Ctrl+C para parar.')
     try:
         while True:
             if not args.simular:
@@ -139,7 +150,10 @@ def run_publisher(args, parser):
                 is_coupon = offer.get('kind') == 'coupon_alert'
                 is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
-                if affiliate is None and not is_ml_coupon and not is_ml_manual:
+                is_ml_offer = offer.get('kind') == 'ml_offer'
+                if is_ml_offer and ml_affiliate is None:
+                    continue
+                if not is_ml_offer and affiliate is None and not is_ml_coupon and not is_ml_manual:
                     continue
                 if not isinstance(key, str):
                     continue
@@ -151,10 +165,12 @@ def run_publisher(args, parser):
                     if not checked or checked[0] != key or checked[2] != offer['url']:
                         continue
                     offer['store'] = checked[1]
-                    if checked[1] != 'Shopee':
+                    if checked[1] not in ('Shopee', 'Mercado Livre'):
                         if key not in announced:
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
+                        continue
+                    if checked[1] == 'Mercado Livre' and not is_ml_offer:
                         continue
                 try:
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
@@ -216,7 +232,12 @@ def run_publisher(args, parser):
                 theme = offer.get('tema_radar')
                 try:
                     if not is_coupon:
-                        offer = ml_manual.prepare(offer) if is_ml_manual else affiliate.prepare(offer)
+                        if is_ml_manual:
+                            offer = ml_manual.prepare(offer)
+                        elif is_ml_offer:
+                            offer = ml_affiliate.prepare(offer)
+                        else:
+                            offer = affiliate.prepare(offer)
                         if not valid_price(offer):
                             raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
                     if theme:
