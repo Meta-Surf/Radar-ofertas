@@ -179,5 +179,156 @@
     "Corsair",
     "SteelSeries",
     "Keychron"
+  ],
+  "Consoles": [
+    "Sony",
+    "PlayStation",
+    "Microsoft",
+    "Xbox",
+    "Nintendo",
+    "Valve",
+    "ASUS"
+  ],
+  "Controles de videogame": [
+    "Sony",
+    "PlayStation",
+    "Microsoft",
+    "Xbox",
+    "Nintendo"
+  ],
+  "Cozinha rápida": [
+    "Philips Walita",
+    "Mondial",
+    "Electrolux",
+    "Midea",
+    "Oster",
+    "Britânia",
+    "Philco"
+  ],
+  "Cafeteiras": [
+    "Oster",
+    "Philips Walita",
+    "Arno",
+    "Mondial",
+    "Britânia",
+    "Electrolux"
+  ],
+  "Eletroportáteis de cozinha": [
+    "Oster",
+    "Philips Walita",
+    "Arno",
+    "Mondial",
+    "Britânia",
+    "Electrolux",
+    "Philco"
+  ],
+  "Limpeza doméstica": [
+    "WAP",
+    "Electrolux",
+    "Kärcher",
+    "Karcher",
+    "Xiaomi",
+    "Samsung",
+    "Philco"
+  ],
+  "Lavanderia": [
+    "Samsung",
+    "LG",
+    "Electrolux",
+    "Brastemp",
+    "Consul",
+    "Panasonic"
+  ],
+  "Climatização": [
+    "LG",
+    "Samsung",
+    "Midea",
+    "Gree",
+    "Springer",
+    "Electrolux",
+    "Arno",
+    "Mondial"
+  ],
+  "Linha branca": [
+    "Brastemp",
+    "Consul",
+    "Electrolux",
+    "Panasonic",
+    "Samsung",
+    "LG",
+    "Midea"
+  ],
+  "Lava-louças e fogões": [
+    "Brastemp",
+    "Electrolux",
+    "Consul",
+    "Fischer",
+    "Midea"
+  ],
+  "Ferramentas de perfuração": [
+    "Bosch",
+    "Makita",
+    "DeWalt",
+    "Stanley",
+    "Milwaukee",
+    "Vonder"
+  ],
+  "Ferramentas de corte": [
+    "Bosch",
+    "Makita",
+    "DeWalt",
+    "Stanley",
+    "Milwaukee",
+    "Vonder"
+  ],
+  "Oficina e casa": [
+    "WAP",
+    "Kärcher",
+    "Karcher",
+    "Vonder",
+    "Schulz",
+    "Tekna"
+  ],
+  "Ferramentas a bateria": [
+    "Makita",
+    "DeWalt",
+    "Bosch",
+    "Milwaukee",
+    "Vonder"
+  ],
+  "Utilidades domésticas": [
+    "Philips Walita",
+    "Electrolux",
+    "Black+Decker",
+    "Black Decker",
+    "Singer"
+  ],
+  "Casa inteligente": [
+    "Intelbras",
+    "TP-Link",
+    "Tapo",
+    "Xiaomi",
+    "Positivo"
+  ],
+  "Bebê eletrônico": [
+    "Philips Avent",
+    "Motorola",
+    "Multikids"
+  ],
+  "Pets automação": [
+    "Xiaomi",
+    "Petlibro"
+  ],
+  "Esporte e fitness": [
+    "Movement",
+    "Kikos",
+    "Genis"
+  ],
+  "Automotivo portátil": [
+    "Baseus",
+    "Bosch",
+    "Vonder",
+    "Black+Decker",
+    "Black Decker"
   ]
 }

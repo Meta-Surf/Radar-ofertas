@@ -1,0 +1,52 @@
+{
+  "groups": ["Tecnologia", "Games", "Eletrodomesticos", "Casa", "Ferramentas", "Automotivo"],
+  "themes": [
+    {"theme":"Televisores","group":"Tecnologia","queries":["smart tv"],"min_price":500,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["oled","mini led","miniled","neo qled","qned"]},
+    {"theme":"Placas de vídeo","group":"Tecnologia","queries":["placa de video"],"min_price":500,"min_discount":10,"min_rating":4.5,"min_sales":50,"premium_terms":["rtx","radeon rx","geforce"]},
+    {"theme":"Processadores (CPU)","group":"Tecnologia","queries":["processador"],"min_price":300,"min_discount":12,"min_rating":4.5,"min_sales":50,"premium_terms":["ryzen 7","ryzen 9","core i7","core i9","ultra 7","ultra 9"]},
+    {"theme":"Memória RAM","group":"Tecnologia","queries":["memoria ram"],"min_price":100,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Notebooks","group":"Tecnologia","queries":["notebook"],"min_price":700,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["gamer","rog","legion","alienware","nitro","macbook"]},
+    {"theme":"Tablets","group":"Tecnologia","queries":["tablet"],"min_price":300,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["ipad","galaxy tab s"]},
+    {"theme":"Smartphones","group":"Tecnologia","queries":["smartphone"],"min_price":300,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["iphone","galaxy s","galaxy ultra","edge 50 ultra","edge 60 ultra"]},
+    {"theme":"Mouses","group":"Tecnologia","queries":["mouse"],"min_price":50,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Teclados","group":"Tecnologia","queries":["teclado"],"min_price":80,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"SSDs","group":"Tecnologia","queries":["ssd"],"min_price":80,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["nvme","990 pro","sn850","kc3000"]},
+    {"theme":"Monitores","group":"Tecnologia","queries":["monitor gamer"],"min_price":300,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":["oled","240hz","360hz","4k"]},
+    {"theme":"Placas-mãe","group":"Tecnologia","queries":["placa mae"],"min_price":300,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Fontes de alimentação","group":"Tecnologia","queries":["fonte atx"],"min_price":200,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Gabinetes","group":"Tecnologia","queries":["gabinete pc"],"min_price":150,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Caixas de som","group":"Tecnologia","queries":["caixa de som bluetooth"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["jbl","bose","sony"]},
+    {"theme":"Fones de ouvido","group":"Tecnologia","queries":["fone de ouvido"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["sony","bose","sennheiser","airpods"]},
+    {"theme":"Roteadores","group":"Tecnologia","queries":["roteador wifi"],"min_price":100,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["wifi 6e","wifi 7","mesh"]},
+    {"theme":"Webcams","group":"Tecnologia","queries":["webcam"],"min_price":80,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Impressoras","group":"Tecnologia","queries":["impressora"],"min_price":400,"min_discount":15,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Consoles","group":"Games","queries":["PlayStation 5","PS5 Slim","PS5 Pro","Xbox Series X","Xbox Series S","Nintendo Switch 2","Nintendo Switch OLED","Steam Deck","ROG Ally"],"min_price":800,"min_discount":10,"min_rating":4.5,"min_sales":20,"premium_terms":["playstation 5","ps5","xbox series","nintendo switch 2","steam deck","rog ally"]},
+    {"theme":"Smartwatches","group":"Tecnologia","queries":["smartwatch"],"min_price":150,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["apple watch","galaxy watch"]},
+    {"theme":"Acessórios de informática","group":"Tecnologia","queries":["hub usb"],"min_price":50,"min_discount":30,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Refrigeração","group":"Tecnologia","queries":["cooler processador"],"min_price":80,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":["water cooler"]},
+    {"theme":"Carregadores","group":"Tecnologia","queries":["carregador usb"],"min_price":50,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+
+    {"theme":"Controles de videogame","group":"Games","queries":["DualSense","Xbox Wireless Controller","Nintendo Joy-Con","Nintendo Switch Pro Controller"],"min_price":180,"min_discount":15,"min_rating":4.5,"min_sales":20,"premium_terms":["dualsense","xbox wireless controller","joy con","joy-con","pro controller"]},
+    {"theme":"Cozinha rápida","group":"Eletrodomesticos","queries":["air fryer"],"min_price":150,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Cafeteiras","group":"Eletrodomesticos","queries":["cafeteira"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["espresso","expresso"]},
+    {"theme":"Eletroportáteis de cozinha","group":"Eletrodomesticos","queries":["liquidificador"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Limpeza doméstica","group":"Eletrodomesticos","queries":["aspirador"],"min_price":100,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["robo aspirador","robô aspirador","karcher","kärcher"]},
+    {"theme":"Lavanderia","group":"Eletrodomesticos","queries":["maquina de lavar"],"min_price":1000,"min_discount":15,"min_rating":4.5,"min_sales":20,"premium_terms":["lava e seca","secadora"]},
+    {"theme":"Climatização","group":"Eletrodomesticos","queries":["ar condicionado inverter"],"min_price":800,"min_discount":12,"min_rating":4.5,"min_sales":20,"premium_terms":["inverter","windfree","dual inverter"]},
+    {"theme":"Linha branca","group":"Eletrodomesticos","queries":["geladeira"],"min_price":700,"min_discount":15,"min_rating":4.5,"min_sales":20,"premium_terms":["french door","inverse","side by side"]},
+    {"theme":"Lava-louças e fogões","group":"Eletrodomesticos","queries":["lava loucas"],"min_price":500,"min_discount":15,"min_rating":4.5,"min_sales":20,"premium_terms":["lava loucas","lava-loucas"]},
+
+    {"theme":"Ferramentas de perfuração","group":"Ferramentas","queries":["parafusadeira furadeira"],"min_price":100,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["bosch","makita","dewalt","milwaukee"]},
+    {"theme":"Ferramentas de corte","group":"Ferramentas","queries":["serra circular"],"min_price":100,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["bosch","makita","dewalt","milwaukee"]},
+    {"theme":"Oficina e casa","group":"Ferramentas","queries":["lavadora de alta pressao"],"min_price":150,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["wap","karcher","kärcher","vonder","schulz"]},
+    {"theme":"Ferramentas a bateria","group":"Ferramentas","queries":["kit ferramenta 18v bateria"],"min_price":150,"min_discount":15,"min_rating":4.5,"min_sales":20,"premium_terms":["bosch","makita","dewalt","milwaukee"]},
+
+    {"theme":"Utilidades domésticas","group":"Casa","queries":["passadeira a vapor"],"min_price":50,"min_discount":25,"min_rating":4.5,"min_sales":50,"premium_terms":[]},
+    {"theme":"Casa inteligente","group":"Casa","queries":["fechadura digital"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":50,"premium_terms":["intelbras","tapo","xiaomi"]},
+    {"theme":"Bebê eletrônico","group":"Casa","queries":["baba eletronica"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":20,"premium_terms":["philips avent","motorola"]},
+    {"theme":"Pets automação","group":"Casa","queries":["alimentador automatico pet"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":20,"premium_terms":["xiaomi","petlibro"]},
+    {"theme":"Esporte e fitness","group":"Casa","queries":["bicicleta ergometrica"],"min_price":150,"min_discount":20,"min_rating":4.5,"min_sales":20,"premium_terms":["movement","kikos"]},
+
+    {"theme":"Automotivo portátil","group":"Automotivo","queries":["jump starter automotivo"],"min_price":80,"min_discount":20,"min_rating":4.5,"min_sales":20,"premium_terms":["baseus","bosch","vonder","black decker","black+decker"]}
+  ]
+}

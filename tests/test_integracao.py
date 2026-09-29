@@ -82,14 +82,16 @@ class IntegrationTests(unittest.TestCase):
 
     def test_radar_queue_never_generates_or_sends_link(self):
         client = Mock()
-        args = SimpleNamespace(publicar=False, enfileirar=True, loop=True, limite=3, round_index=0)
+        args = SimpleNamespace(publicar=False, enfileirar=True, loop=True, limite=3, round_index=0, grupo=None)
         offer = dict(source='shopee_api', price='99,90', product_id='Shopee:1:2', name='Smart TV 55 polegadas', rating=5, sales=100, discount=30)
+        spec = dict(theme='Televisores', group='Tecnologia', queries=['smart tv'],
+                    min_price=0, min_discount=20, min_rating=4.5, min_sales=50, premium_terms=[])
         ledger = Ledger(':memory:')
         with patch('shopee_afiliados.ShopeeAffiliate.from_env', return_value=client), \
              patch('radar_shopee.collect', return_value=([offer], 1)), \
              patch('inteligencia_ofertas.Intelligence.enqueue') as enqueue, \
              patch('ofertas_core.Ledger', return_value=ledger), \
-             patch.object(radar, 'TEMAS', [('Televisores', 'smart tv')]), \
+             patch.object(radar, 'load_catalog', return_value=(['Tecnologia'], [spec])), \
              patch.object(radar.time, 'sleep'), patch('builtins.print'), \
              patch.object(publisher, 'send') as send:
             radar.run_round(args, Mock())
