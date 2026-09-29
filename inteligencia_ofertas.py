@@ -153,9 +153,13 @@ class Intelligence:
                 continue
             offers.append(offer)
         rotation = dict(self.db.execute('SELECT theme,published FROM radar_rotation'))
-        # Bônus único por marca; recorde comparável recebe peso adicional.
+        # Marca, categoria premium e histórico influenciam o ranking.
+        # Loja oficial só conta quando houver sinal booleano explícito da origem.
         def rank(o):
-            return quality(o) + 12 * brand_match(o) + 15 * bool(self.badge(o, channel, now))
+            return (quality(o) + 12 * brand_match(o)
+                    + 18 * bool(o.get('radar_premium'))
+                    + 10 * (o.get('official_store') is True)
+                    + 15 * bool(self.badge(o, channel, now)))
         ranks = {o['product_id']: rank(o) for o in offers}
         rank = lambda o: ranks[o['product_id']]
         ordered = []
