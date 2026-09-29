@@ -37,6 +37,22 @@ Pode substituir pelo link direto de outro produto Shopee. O comando imprime some
 7. Em outra janela, teste a fila: `py bot_ofertas_revisao.py --simular`. Essa opção consulta a API para montar as prévias, mas não publica nem reserva os produtos no registro diário. Fila vazia ou sem ofertas recentes resulta em nenhuma prévia.
 8. Para iniciar as publicações automáticas, execute `py bot_ofertas_revisao.py`. As duas janelas devem permanecer abertas. Ctrl+C encerra cada programa. Alterar o .env exige reiniciar o programa correspondente.
 
+## Recuperação automática após reinício
+
+Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão as mensagens dos últimos 60 minutos. Isso cobre ofertas publicadas enquanto o computador, o monitor ou o `INICIAR_INTEGRADO.bat` estavam desligados.
+
+- `TG_RECUPERAR_MINUTOS=60` define a janela. Use `0` para desativar.
+- `TG_RECUPERAR_MAX_MENSAGENS=500` limita quantas mensagens recentes são consultadas por chat em cada inicialização.
+- A janela efetiva nunca ultrapassa `IDADE_MAXIMA_MINUTOS`, porque o publicador não enviaria uma oferta mais antiga que esse limite.
+- Álbuns são reconstruídos antes da captura, mantendo legenda, links e foto no mesmo lote.
+- Cada lote recebe um `capture_digest`. Se a mesma revisão já estiver na fila, ela não é acrescentada novamente no reinício.
+- Edições geram outro digest e podem ser reprocessadas normalmente.
+- O arquivo local `monitor_recuperacao.json` registra a posição operacional por chat e é ignorado pelo Git. Ele não contém credenciais.
+- Uma falha ao consultar um grupo é isolada: os demais grupos continuam sendo recuperados e depois entram no monitoramento ao vivo.
+- O banco `publicacoes.sqlite3` continua sendo a barreira final contra republicação de um produto já enviado.
+
+O `INICIAR_INTEGRADO.bat` não precisa de argumento novo: como ele inicia `monitor_ofertas.py`, a recuperação roda automaticamente antes de aparecer a mensagem normal de monitoramento.
+
 ## Fotos, cupons e duplicatas
 
 - Usa imagem da API Shopee quando disponível. Caso contrário, usa a foto capturada do Telegram em canais listados por você em TG_MEDIA_CHATS, com autorização de reutilização. A proteção de conteúdo dos grupos é respeitada.
