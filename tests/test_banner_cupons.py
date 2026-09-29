@@ -31,9 +31,10 @@ class BannerTests(unittest.TestCase):
             self.assertTrue(url.endswith('/sendPhoto'))
             self.assertEqual(kwargs['files']['photo'][1].read(),
                              (BASE / 'assets/banner_cupons.png').read_bytes())
-            self.assertIn('R$ 30 OFF acima de R$ 169', kwargs['data']['caption'])
-            self.assertIn('Resgate aqui:', kwargs['data']['caption'])
-            self.assertIn(alert['entries'][0]['affiliate_url'], kwargs['data']['caption'])
+            self.assertIn('🏷️ R$ 30 OFF acima de R$ 169', kwargs['data']['caption'])
+            self.assertIn('<b>🎟️ Opção 1</b>\n' + alert['entries'][0]['affiliate_url'],
+                          kwargs['data']['caption'])
+            self.assertNotIn('Resgate aqui:', kwargs['data']['caption'])
             self.assertNotIn('reply_markup', kwargs['data'])
             return response
         with patch('requests.post', side_effect=sent) as post:

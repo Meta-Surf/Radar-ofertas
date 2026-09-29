@@ -133,29 +133,55 @@ def prepare_alert(client, alert):
                              affiliate_url=converted))
     output = dict(alert, entries=prepared, affiliate_generated=True,
                   product_id=alert_key(prepared, alert['source_date']))
-    if len(alert_caption(output)) > 4000:
+    if visible_length(alert_caption(output)) > 4096:
         raise AffiliateError('Alerta muito longo: condições preservadas; publicação bloqueada.')
     return output
 
+def condition_text(value):
+    """Normaliza somente condições explícitas; nunca calcula ou inventa desconto."""
+    if not isinstance(value, str):
+        return ''
+    lines = []
+    seen = set()
+    for raw in value.splitlines():
+        clean = html.unescape(raw)
+        clean = re.sub(r'[*_`]+', '', clean)
+        clean = re.sub(r'^[\s👉➡🔗🎟️🏷️🔥✅•·\-:]+', '', clean).strip()
+        clean = re.sub(r'\s+', ' ', clean)
+        if not clean or PROMO_RE.search(clean) or not CONDITION_RE.search(clean):
+            continue
+        key = clean.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(clean)
+    if not lines:
+        return ''
+    return '🏷️ ' + html.escape(lines[0]) + (
+        '\n' + '\n'.join(html.escape(line) for line in lines[1:])
+        if len(lines) > 1 else ''
+    )
+
+
 def alert_caption(alert):
     parts = ['🔥 <b>Cupom Shopee</b>']
-    links = []
     for index, entry in enumerate(alert['entries'], 1):
-        parts.append('<b>🎟️ Opção ' + str(index) + '</b>' +
-                     ('\n' + html.escape(entry['conditions']) if entry.get('conditions') else '\nConfira os cupons disponíveis.'))
+        block = []
+        conditions = condition_text(entry.get('conditions', ''))
+        if conditions:
+            block.append(conditions)
+        block.append('<b>🎟️ Opção ' + str(index) + '</b>')
         link = entry.get('affiliate_url')
         if isinstance(link, str) and link:
-            links.append((index, link))
+            block.append(html.escape(link))
+        parts.append('\n'.join(block))
     parts.append('Confira validade, disponibilidade e regras de cada cupom na Shopee.')
     parts.append('#anuncio')
-    if links:
-        if len(links) == 1:
-            rescue = html.escape(links[0][1])
-        else:
-            rescue = '\n'.join('Opção ' + str(index) + ': ' + html.escape(url)
-                               for index, url in links)
-        parts.append('Resgate aqui:\n' + rescue)
     return '\n\n'.join(parts)
+
+
+def visible_length(text):
+    return len(html.unescape(re.sub(r'</?b>', '', text)).encode('utf-16-le')) // 2
 
 def banner_path(base):
     """Resolve a arte a partir da pasta do bot, mesmo iniciado de outra pasta."""
@@ -184,7 +210,7 @@ def send_alert(token, channel, alert, image=None):
         raise AffiliateError('Alerta bloqueado: faltam links gerados pela API.')
     text = alert_caption(alert)
     # Nunca corta condições para caber na legenda de uma foto.
-    image = image if len(text.encode('utf-16-le')) // 2 <= 1024 else None
+    image = image if visible_length(text) <= 1024 else None
     data = {'chat_id': channel, 'parse_mode': 'HTML',
             'caption' if image else 'text': text}
     method = 'sendPhoto' if image else 'sendMessage'
