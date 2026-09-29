@@ -489,7 +489,16 @@ def fetch_browser(url):
                     req = request_route.request
                     if req.is_navigation_request() and not allowed_link(req.url):
                         request_route.abort()
-                    elif req.resource_type in {'image', 'media', 'font'}:
+                    elif req.resource_type == 'image':
+                        try:
+                            host = (urlsplit(req.url).hostname or '').lower()
+                        except (ValueError, TypeError):
+                            host = ''
+                        if host == 'mlstatic.com' or host.endswith('.mlstatic.com'):
+                            request_route.continue_()
+                        else:
+                            request_route.abort()
+                    elif req.resource_type in {'media', 'font'}:
                         request_route.abort()
                     else:
                         request_route.continue_()
