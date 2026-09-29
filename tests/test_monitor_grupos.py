@@ -158,7 +158,7 @@ class CaptureFlowTests(unittest.TestCase):
              patch.object(monitor, 'TelegramClient', return_value=client), \
              patch.object(monitor, 'resolve', return_value=('Shopee:1:2', 'Shopee', 'https://shopee.com.br/product/1/2')) as resolver, \
              patch('sys.argv', ['monitor_ofertas.py']), \
-             patch.dict('os.environ', {'TG_API_ID':'123', 'TG_API_HASH':'fake', 'TG_CHATS':'-123', 'TG_MEDIA_CHATS':'-123', 'TELEGRAM_CANAL':'@destino'}), \
+             patch.dict('os.environ', {'TG_API_ID':'123', 'TG_API_HASH':'fake', 'TG_CHATS':'-123', 'TG_MEDIA_CHATS':'-123', 'TELEGRAM_CANAL':'@destino', 'TG_RECUPERAR_MINUTOS':'0'}), \
              patch('builtins.print'):
             asyncio.run(monitor.main())
             rows = [json.loads(line) for line in (Path(directory) / 'fila_ofertas_v2.jsonl').read_text().splitlines()]
@@ -166,3 +166,96 @@ class CaptureFlowTests(unittest.TestCase):
             self.assertEqual([row['price'] for row in offers], ['113,00', '109,00'])
             self.assertTrue(all(row['image'] for row in offers))
             self.assertEqual([call.args[0] for call in resolver.call_args_list], [PRODUCT, PRODUCT])
+
+    def test_startup_recovery_replays_recent_message_once_and_live_duplicate_is_skipped(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        import monitor_ofertas as monitor
+
+        handlers = {}
+        msg = message(identity=555)
+        msg.grouped_id = None
+        msg.noforwards = False
+        chat = SimpleNamespace(username='origem', noforwards=False)
+        event = SimpleNamespace(message=msg, chat_id=-123, get_chat=AsyncMock(return_value=chat))
+
+        client = Mock()
+        client.start = AsyncMock()
+        client.disconnect = AsyncMock()
+
+        async def dialogs():
+            yield SimpleNamespace(id=-123, entity=chat, is_group=False, is_channel=True)
+        client.iter_dialogs = dialogs
+
+        async def recent(entity, limit):
+            self.assertIs(entity, chat)
+            self.assertEqual(limit, 500)
+            yield msg
+        client.iter_messages = recent
+
+        def on(event_type):
+            def register(fn):
+                handlers[type(event_type).__name__] = fn
+                return fn
+            return register
+        client.on = on
+
+        async def download(photo, file):
+            Path(file).write_bytes(b'image')
+            return file
+        client.download_media = download
+
+        async def events():
+            # Simula o mesmo update chegando ao vivo depois da varredura inicial.
+            await handlers['NewMessage'](event)
+        client.run_until_disconnected = events
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(monitor, 'BASE', Path(directory)), \
+             patch.object(monitor, 'TelegramClient', return_value=client), \
+             patch.object(monitor, 'resolve', return_value=('Shopee:1:2', 'Shopee', 'https://shopee.com.br/product/1/2')) as resolver, \
+             patch('sys.argv', ['monitor_ofertas.py']), \
+             patch.dict('os.environ', {
+                 'TG_API_ID': '123',
+                 'TG_API_HASH': 'fake',
+                 'TG_CHATS': '-123',
+                 'TG_MEDIA_CHATS': '-123',
+                 'TELEGRAM_CANAL': '@destino',
+                 'TG_RECUPERAR_MINUTOS': '60',
+                 'TG_RECUPERAR_MAX_MENSAGENS': '500',
+                 'ML_MANUAL_CHAT': '',
+             }), \
+             patch('builtins.print'):
+            asyncio.run(monitor.main())
+
+            queue = Path(directory) / 'fila_ofertas_v2.jsonl'
+            rows = [json.loads(line) for line in queue.read_text(encoding='utf-8').splitlines()]
+            offers = [row for row in rows if row.get('product_id') == 'Shopee:1:2']
+            self.assertEqual(len(offers), 1)
+            self.assertTrue(offers[0].get('capture_digest'))
+            self.assertEqual(resolver.call_count, 1)
+
+            state = json.loads((Path(directory) / 'monitor_recuperacao.json').read_text(encoding='utf-8'))
+            self.assertEqual(state['-123']['last_message_id'], 555)
+
+    def test_queue_digest_reader_uses_latest_revision(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        import monitor_ofertas as monitor
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'fila_ofertas_v2.jsonl'
+            rows = [
+                {'chat_id': -123, 'message_id': 7, 'capture_digest': 'old'},
+                {'chat_id': -123, 'message_id': 7, 'capture_digest': 'new'},
+                {'chat_id': -456, 'message_id': 8},
+            ]
+            path.write_text('\n'.join(json.dumps(row) for row in rows) + '\n', encoding='utf-8')
+            self.assertEqual(
+                monitor.queued_revision_digests(path),
+                {('-123', 7): 'new'},
+            )
+
