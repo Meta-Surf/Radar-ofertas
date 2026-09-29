@@ -340,20 +340,58 @@ def browser_social_featured(page, current):
             raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
         control = selected[0]
         data = control.evaluate(r"""(el) => {
-            const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+            const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
             let node = el;
-            for (let level = 0; level < 9 && node; level++, node = node.parentElement) {
-                const titleEl = node.querySelector('.poly-component__title') || node.querySelector('[class*="title"]') || node.querySelector('h1, h2, h3');
-                const fractionEl = node.querySelector('.andes-money-amount__fraction') || node.querySelector('[class*="money-amount__fraction"]');
-                const centsEl = node.querySelector('.andes-money-amount__cents') || node.querySelector('[class*="money-amount__cents"]');
-                const imgEl = node.querySelector('img');
+
+            for (let level = 0; level < 12 && node; level++, node = node.parentElement) {
+                const titleEl =
+                    node.querySelector('.poly-component__title') ||
+                    node.querySelector('[class*="title"]') ||
+                    node.querySelector('h1, h2, h3');
+
                 const anchor = el.closest('a');
                 const href = anchor ? anchor.href : (el.href || null);
                 const title = titleEl ? clean(titleEl.textContent) : '';
-                const fraction = fractionEl ? clean(fractionEl.textContent) : '';
-                const cents = centsEl ? clean(centsEl.textContent) : '';
+
+                const moneyNodes = Array.from(
+                    node.querySelectorAll('.andes-money-amount')
+                ).map(amount => {
+                    const fractionEl =
+                        amount.querySelector('.andes-money-amount__fraction') ||
+                        amount.querySelector('[class*="money-amount__fraction"]');
+                    const centsEl =
+                        amount.querySelector('.andes-money-amount__cents') ||
+                        amount.querySelector('[class*="money-amount__cents"]');
+
+                    return {
+                        fraction: fractionEl ? clean(fractionEl.textContent) : '',
+                        cents: centsEl ? clean(centsEl.textContent) : ''
+                    };
+                }).filter(value => value.fraction);
+
+                if (!moneyNodes.length) {
+                    const fractions = Array.from(
+                        node.querySelectorAll(
+                            '.andes-money-amount__fraction, [class*="money-amount__fraction"]'
+                        )
+                    ).map(n => clean(n.textContent)).filter(Boolean);
+
+                    const cents = Array.from(
+                        node.querySelectorAll(
+                            '.andes-money-amount__cents, [class*="money-amount__cents"]'
+                        )
+                    ).map(n => clean(n.textContent)).filter(Boolean);
+
+                    for (let i = 0; i < fractions.length; i++) {
+                        moneyNodes.push({
+                            fraction: fractions[i],
+                            cents: cents[i] || ''
+                        });
+                    }
+                }
+
                 const imageCandidates = [];
-                if (imgEl) {
+                for (const imgEl of node.querySelectorAll('img')) {
                     for (const value of [
                         imgEl.currentSrc,
                         imgEl.src,
@@ -364,6 +402,7 @@ def browser_social_featured(page, current):
                     ]) {
                         if (value) imageCandidates.push(value);
                     }
+
                     const picture = imgEl.closest('picture');
                     if (picture) {
                         for (const source of picture.querySelectorAll('source')) {
@@ -378,10 +417,19 @@ def browser_social_featured(page, current):
                         }
                     }
                 }
-                if (href && title && fraction) {
-                    return {href, title, fraction, cents, imageCandidates};
+
+                if (href && title && moneyNodes.length && imageCandidates.length) {
+                    const currentPrice = moneyNodes[moneyNodes.length - 1];
+                    return {
+                        href,
+                        title,
+                        fraction: currentPrice.fraction,
+                        cents: currentPrice.cents,
+                        imageCandidates
+                    };
                 }
             }
+
             return null;
         }""")
         if not isinstance(data, dict):
