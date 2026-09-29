@@ -16,6 +16,7 @@ dados salvos.txt
 *.db-*
 *.jsonl
 radar_ml_estado.json
+monitor_recuperacao.json
 ml_itens.txt
 ml_links_afiliados.json
 imagens_ofertas/
