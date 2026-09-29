@@ -33,20 +33,27 @@ def rows():
                 continue
 
 def ordered_rows(intelligence=None, channel=""):
-    # Prioridade absoluta aos grupos; preserva o ranking da fila do radar.
-    groups, radar, latest = [], [], {}
+    # Prioridade: grupos ao vivo > recuperadas > radar.
+    # A pausa das recuperadas é aplicada no publicador; durante essa pausa o radar
+    # continua podendo usar sua própria janela de 10 minutos.
+    live_groups, recovered_groups, radar, latest = [], [], [], {}
     for offer in rows():
         if offer.get('source') == 'shopee_api':
             radar.append(offer)
         elif offer.get('kind') != 'coupon_alert' and offer.get('chat_id') is not None and offer.get('message_id') is not None:
             # A fila é append-only: a última captura substitui a versão anterior,
-            # inclusive quando a edição remove o preço.
+            # inclusive quando uma edição altera preço, mídia ou origem de recuperação.
             latest[(offer['chat_id'], offer['message_id'])] = offer
+        elif offer.get('recovered'):
+            recovered_groups.append(offer)
         else:
-            groups.append(offer)
-    groups.extend(latest.values())
-    groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
-    yield from groups
+            live_groups.append(offer)
+    for offer in latest.values():
+        (recovered_groups if offer.get('recovered') else live_groups).append(offer)
+    live_groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
+    recovered_groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
+    yield from live_groups
+    yield from recovered_groups
     if intelligence is None:
         yield from radar
     else:
@@ -128,6 +135,8 @@ def run_publisher(args, parser):
         print("Afiliados Mercado Livre indisponível:", str(e), "| links automáticos ML ficarão bloqueados.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 600  # Intervalo exclusivo das publicações originadas no radar.
+    recovery_interval = max(5, int(os.getenv('INTERVALO_RECUPERADAS', '30')))
+    recovery_max_age = max(1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45')))
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     from inteligencia_ofertas import Intelligence
@@ -152,6 +161,7 @@ def run_publisher(args, parser):
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
                 is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
+                is_recovered = bool(offer.get('recovered')) and offer.get('source') != 'shopee_api'
                 if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
                     marker = ('ml_afiliado_indisponivel', key)
                     if marker not in announced:
@@ -186,7 +196,8 @@ def run_publisher(args, parser):
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
                 except (KeyError, TypeError, ValueError):
                     continue
-                if age < -60 or age > max_age * 60:
+                allowed_age = min(max_age, recovery_max_age) if is_recovered else max_age
+                if age < -60 or age > allowed_age * 60:
                     continue
                 if is_ml_manual or is_ml_offer or is_ml_pending:
                     if time.monotonic() < retry_at.get(key, 0):
@@ -248,7 +259,10 @@ def run_publisher(args, parser):
                         continue
                     if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
                         continue
-                origin = 'radar' if offer.get('source') == 'shopee_api' else 'telegram'
+                origin = ('radar' if offer.get('source') == 'shopee_api'
+                          else ('recuperada' if is_recovered else 'telegram'))
+                if not args.simular and is_recovered and ledger.publication_delay(clock_id=4) > 0:
+                    continue
                 if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
                     continue
                 if not args.simular:
@@ -306,6 +320,8 @@ def run_publisher(args, parser):
                     # Grava antes do envio: falha ou reinício não encurta a pausa.
                     if origin == 'radar':
                         ledger.mark_attempt(interval, clock_id=2)
+                    elif is_recovered:
+                        ledger.mark_attempt(recovery_interval, clock_id=4)
                     message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
                 except Exception:
                     print('Envio com resultado incerto. Produto bloqueado no histórico:', key,

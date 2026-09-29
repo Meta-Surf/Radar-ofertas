@@ -235,6 +235,7 @@ class CaptureFlowTests(unittest.TestCase):
             offers = [row for row in rows if row.get('product_id') == 'Shopee:1:2']
             self.assertEqual(len(offers), 1)
             self.assertTrue(offers[0].get('capture_digest'))
+            self.assertTrue(offers[0].get('recovered'))
             self.assertEqual(resolver.call_count, 1)
 
             state = json.loads((Path(directory) / 'monitor_recuperacao.json').read_text(encoding='utf-8'))

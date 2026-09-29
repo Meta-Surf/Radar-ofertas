@@ -39,9 +39,9 @@ Pode substituir pelo link direto de outro produto Shopee. O comando imprime some
 
 ## Recuperação automática após reinício
 
-Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão as mensagens dos últimos 60 minutos. Isso cobre ofertas publicadas enquanto o computador, o monitor ou o `INICIAR_INTEGRADO.bat` estavam desligados.
+Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão as mensagens dos últimos 30 minutos. Isso cobre ofertas publicadas enquanto o computador, o monitor ou o `INICIAR_INTEGRADO.bat` estavam desligados.
 
-- `TG_RECUPERAR_MINUTOS=60` define a janela. Use `0` para desativar.
+- `TG_RECUPERAR_MINUTOS=30` define a janela. Use `0` para desativar.
 - `TG_RECUPERAR_MAX_MENSAGENS=500` limita quantas mensagens recentes são consultadas por chat em cada inicialização.
 - A janela efetiva nunca ultrapassa `IDADE_MAXIMA_MINUTOS`, porque o publicador não enviaria uma oferta mais antiga que esse limite.
 - Álbuns são reconstruídos antes da captura, mantendo legenda, links e foto no mesmo lote.
@@ -52,6 +52,16 @@ Ao iniciar, o monitor consulta os grupos configurados e reprocessa por padrão a
 - O banco `publicacoes.sqlite3` continua sendo a barreira final contra republicação de um produto já enviado.
 
 O `INICIAR_INTEGRADO.bat` não precisa de argumento novo: como ele inicia `monitor_ofertas.py`, a recuperação roda automaticamente antes de aparecer a mensagem normal de monitoramento.
+
+### Ordem de publicação
+
+A recuperação não muda a rotação de busca do radar. A prioridade do publicador passa a ser:
+
+1. ofertas novas captadas ao vivo nos grupos;
+2. ofertas recuperadas, da mais recente para a mais antiga;
+3. radar Shopee.
+
+As recuperadas não são disparadas em rajada: `INTERVALO_RECUPERADAS=30` cria um intervalo mínimo de 30 segundos entre elas. Durante essa pausa, uma oferta nova do grupo pode sair imediatamente e o radar continua podendo publicar se a janela própria de 10 minutos estiver liberada. `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45` descarta uma recuperada que envelheceu demais enquanto aguardava na fila.
 
 ## Fotos, cupons e duplicatas
 
