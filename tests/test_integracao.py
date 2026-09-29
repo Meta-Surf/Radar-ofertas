@@ -42,12 +42,68 @@ class IntegrationTests(unittest.TestCase):
             finally:
                 ledger.db.close()
 
-    def test_groups_have_priority_over_all_radar_offers(self):
-        offers = [dict(product_id='g1', source_date='2026-01-01'),
-                  dict(product_id='g2', source_date='2026-01-02'),
-                  dict(product_id='r1', source='shopee_api')]
+    def test_live_then_recovered_then_radar_order(self):
+        offers = [
+            dict(product_id='g1', source_date='2026-01-01'),
+            dict(product_id='rec1', source_date='2026-01-03', recovered=True),
+            dict(product_id='g2', source_date='2026-01-02'),
+            dict(product_id='rec2', source_date='2026-01-04', recovered=True),
+            dict(product_id='r1', source='shopee_api'),
+        ]
         with patch.object(publisher, 'rows', return_value=iter(offers)):
-            self.assertEqual([o['product_id'] for o in publisher.ordered_rows()], ['g2', 'g1', 'r1'])
+            self.assertEqual(
+                [o['product_id'] for o in publisher.ordered_rows()],
+                ['g2', 'g1', 'rec2', 'rec1', 'r1'],
+            )
+
+    def test_recovery_cooldown_does_not_block_eligible_radar(self):
+        now = datetime.now(timezone.utc).isoformat()
+        recovered = dict(
+            product_id='Shopee:1:10',
+            url='https://shopee.com.br/product/1/10',
+            price='99,90',
+            source='telegram',
+            source_date=now,
+            recovered=True,
+            api_image='https://x.susercontent.com/recovered.jpg',
+        )
+        radar_offer = dict(
+            product_id='Shopee:1:20',
+            url='https://shopee.com.br/product/1/20',
+            price='89,90',
+            source='shopee_api',
+            source_date=now,
+            api_image='https://x.susercontent.com/radar.jpg',
+            rating=5,
+            sales=100,
+            discount=30,
+        )
+        client = Mock()
+        client.prepare.side_effect = lambda offer: dict(offer)
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            try:
+                from inteligencia_ofertas import Intelligence
+                intelligence = Intelligence(ledger.db)
+                intelligence.enqueue([radar_offer])
+                ledger.mark_attempt(30, clock_id=4)
+                with patch.object(publisher, 'Ledger', return_value=ledger), \
+                     patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                     patch.object(publisher, 'rows', return_value=iter([recovered])), \
+                     patch.object(publisher, 'send', return_value=(123, 0)) as send, \
+                     patch.object(publisher.time, 'sleep', side_effect=[KeyboardInterrupt]), \
+                     patch.dict('os.environ', {
+                         'TELEGRAM_TOKEN': 'fake',
+                         'TELEGRAM_CANAL': '@fake',
+                         'INTERVALO_RECUPERADAS': '30',
+                     }), \
+                     patch('builtins.print'):
+                    with self.assertRaises(KeyboardInterrupt):
+                        publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+                    self.assertEqual(send.call_count, 1)
+                    self.assertEqual(send.call_args.args[2]['product_id'], 'Shopee:1:20')
+            finally:
+                ledger.db.close()
 
     def test_cooldown_survives_restart(self):
         with tempfile.TemporaryDirectory() as d:
