@@ -238,7 +238,7 @@ async def main():
                     print('Ignorada: não foi possível resolver o link do produto.', chat_id, messages[0].id)
                 return
             key, store, direct_url = next(iter(products.values()))
-            if store != 'Shopee':
+            if store not in ('Shopee', 'Mercado Livre'):
                 return
             image = None
             if str(chat_id) in allowed_media:
@@ -254,7 +254,12 @@ async def main():
                     except Exception:
                         logging.warning('Imagem indisponível na mensagem %s.', photo.id)
             captured_price = price_info(text) or {}
+            title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
+            title = next((line for line in title_lines
+                          if line and not re.search(r'https?://|R\\$|[💵💰💸]|\\b(?:cupom|link|compre|resgate)\\b', line, re.I)), '')
             row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
+                   'kind': 'ml_offer' if store == 'Mercado Livre' else 'product_offer',
+                   'name': title[:160],
                    'price': captured_price.get('price'),
                    'price_condition': captured_price.get('price_condition', ''),
                    'price_from': captured_price.get('price_from', False),
