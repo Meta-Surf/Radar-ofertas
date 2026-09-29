@@ -146,8 +146,8 @@ def condition_text(value):
     for raw in value.splitlines():
         clean = html.unescape(raw)
         clean = re.sub(r'[*_`]+', '', clean)
-        clean = re.sub(r'^[\\s👉➡🔗🎟️🏷️🔥✅•·\\-:]+', '', clean).strip()
-        clean = re.sub(r'\\s+', ' ', clean)
+        clean = re.sub(r'^[\s👉➡🔗🎟️🏷️🔥✅•·\-:]+', '', clean).strip()
+        clean = re.sub(r'\s+', ' ', clean)
         if not clean or PROMO_RE.search(clean) or not CONDITION_RE.search(clean):
             continue
         key = clean.casefold()
