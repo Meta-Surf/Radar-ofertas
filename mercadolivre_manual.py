@@ -18,17 +18,22 @@ def trusted(chat):
     return bool(chat_id()) and str(chat) == chat_id()
 
 
+def official_ml_host(host):
+    host = str(host or '').lower().rstrip('.')
+    return (host == 'meli.la'
+            or host in {'mercadolivre.com', 'mercadolivre.com.br'}
+            or host.endswith('.mercadolivre.com')
+            or host.endswith('.mercadolivre.com.br'))
+
+
 def allowed_link(url):
     try:
         p = urlsplit(url)
         return (p.scheme == 'https' and not p.username and not p.password
                 and p.port in (None, 443) and not re.search(r'[\s\\\x00-\x1f]', url)
-                and p.hostname in {'meli.la', 'mercadolivre.com', 'www.mercadolivre.com',
-                                   'mercadolivre.com.br', 'www.mercadolivre.com.br',
-                                   'produto.mercadolivre.com.br'} and p.path not in ('', '/'))
+                and official_ml_host(p.hostname) and p.path not in ('', '/'))
     except (ValueError, TypeError):
         return False
-
 
 def links(messages):
     return list(dict.fromkeys(u for m in messages for u in extract_links(m) if allowed_link(u)))

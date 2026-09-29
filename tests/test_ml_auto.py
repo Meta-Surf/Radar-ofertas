@@ -101,6 +101,17 @@ class AutoMLTests(unittest.TestCase):
             auto.fetch_http(URL, transport)
         self.assertEqual(transport.get.call_count, 1)
 
+    def test_official_ml_subdomain_redirect_is_allowed_and_uses_local_session(self):
+        redirected = 'https://click.mercadolivre.com.br/produto/p/MLB123456'
+        self.assertTrue(manual.allowed_link(redirected))
+        self.assertFalse(manual.allowed_link('https://mercadolivre.com.br.evil.test/p/MLB123456'))
+        transport = Mock()
+        transport.get.side_effect = [response(302, headers={'Location': redirected}),
+                                     response(text=document())]
+        with patch.dict(os.environ, {'ML_AFFILIATE_COOKIE': 'foo=bar; session=abc123'}):
+            self.assertEqual(auto.fetch_http(URL, transport)['price'], '199,90')
+        self.assertIn('Cookie', transport.get.call_args.kwargs['headers'])
+
     def test_wrapper_only_follows_one_product_never_recommendation(self):
         wrapper = '<a href="' + DIRECT + '">Câmera</a>'
         self.assertEqual(auto.next_destination(wrapper, URL), DIRECT)
