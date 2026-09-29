@@ -124,6 +124,25 @@ def image_url(value):
     raise AffiliateError('Imagem do produto não identificada no domínio de imagens ML.')
 
 
+
+def social_image_url(values):
+    """Escolhe uma imagem ML válida entre src/currentSrc/srcset/data-src do card."""
+    if not isinstance(values, list):
+        values = [values]
+    candidates = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        for candidate in re.findall(r'https://[^\s,]+', html.unescape(value)):
+            candidates.append(candidate.strip().strip('"\''))
+    for candidate in dict.fromkeys(candidates):
+        try:
+            return image_url(candidate)
+        except AffiliateError:
+            continue
+    raise AffiliateError('Imagem do produto em destaque não identificada no domínio de imagens ML.')
+
+
 def identity(url):
     if not allowed_link(url):
         return None
@@ -320,7 +339,7 @@ def browser_social_featured(page, current):
         if len(selected) != 1:
             raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
         control = selected[0]
-        data = control.evaluate("""(el) => {
+        data = control.evaluate(r"""(el) => {
             const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
             let node = el;
             for (let level = 0; level < 9 && node; level++, node = node.parentElement) {
@@ -333,9 +352,34 @@ def browser_social_featured(page, current):
                 const title = titleEl ? clean(titleEl.textContent) : '';
                 const fraction = fractionEl ? clean(fractionEl.textContent) : '';
                 const cents = centsEl ? clean(centsEl.textContent) : '';
-                const image = imgEl ? (imgEl.currentSrc || imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                const imageCandidates = [];
+                if (imgEl) {
+                    for (const value of [
+                        imgEl.currentSrc,
+                        imgEl.src,
+                        imgEl.getAttribute('src'),
+                        imgEl.getAttribute('data-src'),
+                        imgEl.getAttribute('srcset'),
+                        imgEl.getAttribute('data-srcset')
+                    ]) {
+                        if (value) imageCandidates.push(value);
+                    }
+                    const picture = imgEl.closest('picture');
+                    if (picture) {
+                        for (const source of picture.querySelectorAll('source')) {
+                            for (const value of [
+                                source.getAttribute('src'),
+                                source.getAttribute('data-src'),
+                                source.getAttribute('srcset'),
+                                source.getAttribute('data-srcset')
+                            ]) {
+                                if (value) imageCandidates.push(value);
+                            }
+                        }
+                    }
+                }
                 if (href && title && fraction) {
-                    return {href, title, fraction, cents, image};
+                    return {href, title, fraction, cents, imageCandidates};
                 }
             }
             return null;
@@ -354,7 +398,7 @@ def browser_social_featured(page, current):
             raise AffiliateError('Preço do produto em destaque não identificado.')
         cents = (cents[:2] if cents else '00').ljust(2, '0')
         price = f'{int(fraction):,}'.replace(',', '.') + ',' + cents
-        image = image_url(str(data.get('image') or '').strip())
+        image = social_image_url(data.get('imageCandidates') or data.get('image') or [])
         return dict(name=html.unescape(title), price=price,
                     price_condition='Preço exibido no destaque do Perfil Social; confira as condições de pagamento.',
                     price_from=False, api_image=image, resolved_url=target,
