@@ -112,6 +112,25 @@ class AutoMLTests(unittest.TestCase):
             self.assertEqual(auto.fetch_http(URL, transport)['price'], '199,90')
         self.assertIn('Cookie', transport.get.call_args.kwargs['headers'])
 
+    def test_nested_official_target_is_resolved_but_external_is_ignored(self):
+        wrapped = ('https://www.mercadolivre.com.br/redirect?target='
+                   'https%3A%2F%2Fwww.mercadolivre.com.br%2Fcamera%2Fp%2FMLB123456')
+        self.assertEqual(auto.nested_official_urls(wrapped), [DIRECT])
+        evil = ('https://www.mercadolivre.com.br/redirect?target='
+                'https%3A%2F%2Fevil.test%2Fp%2FMLB123456')
+        self.assertEqual(auto.nested_official_urls(evil), [])
+        self.assertEqual(auto.next_destination('', wrapped), DIRECT)
+
+    def test_http_transport_preloads_cookie_into_persistent_session(self):
+        session = Mock()
+        session.cookies = Mock()
+        with patch.object(auto.requests, 'Session', return_value=session), \
+             patch.dict(os.environ, {'ML_AFFILIATE_COOKIE': 'foo=bar; session=abc123'}):
+            result = auto.http_transport()
+        self.assertIs(result, session)
+        session.cookies.set.assert_any_call('foo', 'bar')
+        session.cookies.set.assert_any_call('session', 'abc123')
+
     def test_wrapper_only_follows_one_product_never_recommendation(self):
         wrapper = '<a href="' + DIRECT + '">Câmera</a>'
         self.assertEqual(auto.next_destination(wrapper, URL), DIRECT)
