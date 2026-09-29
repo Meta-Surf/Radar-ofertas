@@ -150,16 +150,26 @@ def run_publisher(args, parser):
                 is_coupon = offer.get('kind') == 'coupon_alert'
                 is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
+                is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
-                if is_ml_offer and ml_affiliate is None:
+                if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
+                    marker = ('ml_afiliado_indisponivel', key)
+                    if marker not in announced:
+                        print('Oferta Mercado Livre captada, mas o gerador de afiliado está indisponível:', key)
+                        announced.add(marker)
                     continue
-                if not is_ml_offer and affiliate is None and not is_ml_coupon and not is_ml_manual:
+                if not (is_ml_offer or is_ml_pending) and affiliate is None and not is_ml_coupon and not is_ml_manual:
                     continue
                 if not isinstance(key, str):
                     continue
                 if is_ml_manual:
                     if not ml_manual.trusted(offer.get('chat_id')):
                         continue
+                elif is_ml_pending:
+                    if (not ml_manual.allowed_link(offer.get('url'))
+                            or offer.get('product_id') != ml_manual.pending_key(offer['url'])):
+                        continue
+                    offer['store'] = 'Mercado Livre'
                 elif not is_coupon:
                     checked = product(offer.get('url', ''))
                     if not checked or checked[0] != key or checked[2] != offer['url']:
@@ -178,12 +188,12 @@ def run_publisher(args, parser):
                     continue
                 if age < -60 or age > max_age * 60:
                     continue
-                if is_ml_manual or is_ml_offer:
+                if is_ml_manual or is_ml_offer or is_ml_pending:
                     if time.monotonic() < retry_at.get(key, 0):
                         continue
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         continue
-                    needs_public_data = (not offer.get('name') or not valid_price(offer)
+                    needs_public_data = (is_ml_pending or not offer.get('name') or not valid_price(offer)
                                          or (require_photo and not (offer.get('api_image') or photo_path(offer))))
                     if needs_public_data:
                         try:
@@ -195,6 +205,22 @@ def run_publisher(args, parser):
                                     announced.add(marker)
                                 continue
                             offer = ready
+                            key = offer.get('product_id')
+                            is_ml_pending = offer.get('kind') == 'ml_offer_pending'
+                            is_ml_offer = offer.get('kind') == 'ml_offer'
+                            if not isinstance(key, str):
+                                continue
+                            if is_ml_pending:
+                                print('Leitura automática ML ainda não normalizou o produto:', key)
+                                retry_at[key] = time.monotonic() + 300
+                                continue
+                            if is_ml_offer:
+                                checked = product(offer.get('url', ''))
+                                if (not checked or checked[0] != key or checked[1] != 'Mercado Livre'
+                                        or checked[2] != offer['url']):
+                                    print('Leitura ML retornou produto inconsistente; publicação bloqueada:', key)
+                                    retry_at[key] = time.monotonic() + 300
+                                    continue
                         except AffiliateError as error:
                             print('Leitura automática ML pendente:', key, '|', str(error))
                             retry_at[key] = time.monotonic() + 300

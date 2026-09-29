@@ -223,26 +223,39 @@ async def main():
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
             products = {}
+            pending_ml = {}
             unresolved = []
             for url in urls:
                 p, reason = await resolve_for_capture(url)
                 if p:
                     products[p[0]] = p
+                elif ml_manual.allowed_link(url):
+                    # Links meli.la podem depender de JS, sessão ou página intermediária.
+                    # Não perde a oferta: envia à fila para o leitor ML com navegador resolver.
+                    pending_ml[url] = reason or 'Aguardando resolução automática do Mercado Livre.'
                 else:
                     unresolved.append(reason)
-            # Um segundo link não resolvido pode esconder outro produto.
+            # Um segundo link não resolvido fora do ML pode esconder outro produto.
             if unresolved:
                 print('Ignorada: não foi possível resolver todos os links do produto.',
                       chat_id, messages[0].id, '|', ' | '.join(dict.fromkeys(unresolved)))
                 return
             # Não associa uma única imagem/preço a vários produtos diferentes.
-            if len(products) != 1:
-                if products:
-                    print('Ignorada: mensagem contém vários produtos.')
+            if len(products) + len(pending_ml) != 1:
+                if products or pending_ml:
+                    print('Ignorada: mensagem contém vários produtos ou links ambíguos.')
                 elif urls:
                     print('Ignorada: não foi possível resolver o link do produto.', chat_id, messages[0].id)
                 return
-            key, store, direct_url = next(iter(products.values()))
+            if pending_ml:
+                direct_url = next(iter(pending_ml))
+                key, store = ml_manual.pending_key(direct_url), 'Mercado Livre'
+                kind = 'ml_offer_pending'
+                print('Oferta Mercado Livre enfileirada para resolução automática:',
+                      key, '| mensagem', messages[0].id)
+            else:
+                key, store, direct_url = next(iter(products.values()))
+                kind = 'ml_offer' if store == 'Mercado Livre' else 'product_offer'
             if store not in ('Shopee', 'Mercado Livre'):
                 return
             image = None
@@ -263,7 +276,7 @@ async def main():
             title = next((line for line in title_lines
                           if line and not re.search(r'https?://|R\\$|[💵💰💸]|\\b(?:cupom|link|compre|resgate)\\b', line, re.I)), '')
             row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
-                   'kind': 'ml_offer' if store == 'Mercado Livre' else 'product_offer',
+                   'kind': kind,
                    'name': title[:160],
                    'price': captured_price.get('price'),
                    'price_condition': captured_price.get('price_condition', ''),

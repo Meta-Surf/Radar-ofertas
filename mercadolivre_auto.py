@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
 import requests
-from mercadolivre_manual import allowed_link, trusted, key
+from mercadolivre_manual import allowed_link, trusted, key, pending_key
 from ofertas_core import product
 from shopee_afiliados import AffiliateError
 
@@ -646,10 +646,14 @@ def fetch_browser(url):
 
 def enrich(offer):
     manual = offer.get('kind') == 'ml_manual_offer'
+    pending = offer.get('kind') == 'ml_offer_pending' and offer.get('source') == 'telegram'
     automatic = offer.get('kind') == 'ml_offer' and offer.get('source') == 'telegram'
     if manual:
         authorized = (trusted(offer.get('chat_id')) and allowed_link(offer.get('url'))
                       and offer.get('product_id') == key(offer['url']))
+    elif pending:
+        authorized = (allowed_link(offer.get('url'))
+                      and offer.get('product_id') == pending_key(offer['url']))
     elif automatic:
         identified = product(offer.get('url', ''))
         authorized = bool(identified and identified[1] == 'Mercado Livre'
@@ -665,8 +669,14 @@ def enrich(offer):
             found = fetch_browser(offer['url'])
         except AffiliateError as browser_error:
             raise AffiliateError(str(http_error) + ' ' + str(browser_error)) from None
-    # Preço escrito pelo operador continua prevalecendo. Completa somente ausências.
+    # Preço escrito na origem continua prevalecendo. Completa somente ausências.
     result = dict(offer, resolved_url=found['resolved_url'], auto_fetched_at=found['auto_fetched_at'])
+    if pending:
+        identified = product(found.get('resolved_url', ''))
+        if not identified or identified[1] != 'Mercado Livre':
+            raise AffiliateError('Link Mercado Livre resolvido, mas o produto final ainda não pôde ser identificado com segurança.')
+        result.update(kind='ml_offer', product_id=identified[0], url=identified[2],
+                      original_url=offer['url'], store='Mercado Livre')
     if not result.get('name'):
         result['name'] = found['name']
     if not result.get('price'):
