@@ -451,6 +451,14 @@ def browser_social_destination(page, context, current):
         raise AffiliateError('Não foi possível resolver o botão "Ir para produto" do Perfil Social.') from None
 
 
+def browser_image_allowed(url):
+    try:
+        image_url(url)
+        return True
+    except AffiliateError:
+        return False
+
+
 def fetch_browser(url):
     try:
         from playwright.sync_api import sync_playwright
@@ -490,11 +498,7 @@ def fetch_browser(url):
                     if req.is_navigation_request() and not allowed_link(req.url):
                         request_route.abort()
                     elif req.resource_type == 'image':
-                        try:
-                            host = (urlsplit(req.url).hostname or '').lower()
-                        except (ValueError, TypeError):
-                            host = ''
-                        if host == 'mlstatic.com' or host.endswith('.mlstatic.com'):
+                        if browser_image_allowed(req.url):
                             request_route.continue_()
                         else:
                             request_route.abort()
