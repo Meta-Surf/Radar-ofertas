@@ -57,13 +57,44 @@ def product(url):
             return ('Amazon:' + asin, 'Amazon', 'https://www.amazon.com.br/dp/' + asin)
     if 'mercadolivre' in p.hostname:
         query = parse_qs(p.query)
-        identity = ' '.join(query.get('item_id', []) + query.get('pdp_filters', []))
-        m = re.search(r'MLB-?(\d+)', identity, re.I) or re.search(r'MLB-?(\d+)', p.path, re.I)
-        if m:
-            item = m[1]
-            url = ('https://www.mercadolivre.com.br/p/MLB' + item if '/p/' in p.path and not identity
-                   else 'https://produto.mercadolivre.com.br/MLB-' + item + '-_JM')
+
+        def exact_item(values):
+            for value in values:
+                match = re.fullmatch(r'\s*MLB-?(\d+)\s*', str(value), re.I)
+                if match:
+                    return match[1]
+            return None
+
+        # Só aceita IDs de item explicitamente rotulados. Um pdp_filters como
+        # "deal:MLB779362-1" identifica a campanha, não o produto.
+        item = exact_item(query.get('item_id', []))
+        if not item:
+            for value in query.get('pdp_filters', []):
+                match = re.search(r'(?:^|[,;|\s])item_id\s*:\s*MLB-?(\d+)(?=$|[,;|\s])',
+                                  str(value), re.I)
+                if match:
+                    item = match[1]
+                    break
+
+        # Em páginas de catálogo /p/, wid aponta para o anúncio/vendedor efetivo.
+        if not item:
+            item = exact_item(query.get('wid', []))
+
+        if item:
+            url = 'https://produto.mercadolivre.com.br/MLB-' + item + '-_JM'
             return ('MercadoLivre:' + item, 'Mercado Livre', url)
+
+        catalog = re.search(r'/p/MLB-?(\d+)(?:/|$)', p.path, re.I)
+        if catalog:
+            item = catalog[1]
+            return ('MercadoLivre:' + item, 'Mercado Livre',
+                    'https://www.mercadolivre.com.br/p/MLB' + item)
+
+        listing = re.search(r'MLB-?(\d+)', p.path, re.I)
+        if listing:
+            item = listing[1]
+            return ('MercadoLivre:' + item, 'Mercado Livre',
+                    'https://produto.mercadolivre.com.br/MLB-' + item + '-_JM')
     return None
 
 def embedded_product(url):
