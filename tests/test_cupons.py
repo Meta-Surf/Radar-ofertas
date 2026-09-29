@@ -177,7 +177,8 @@ class CouponTests(unittest.TestCase):
         with patch('requests.post', return_value=response) as post:
             coupons.send_alert('fake', '@fake', ready, Mock())
             self.assertTrue(post.call_args.args[0].endswith('sendMessage'))
-            self.assertIn(ready['entries'][0]['conditions'], post.call_args.kwargs['data']['text'])
+            normalized = coupons.condition_text(ready['entries'][0]['conditions'])
+            self.assertIn(normalized, post.call_args.kwargs['data']['text'])
 
     def test_coupon_publishes_during_radar_wait_and_deduplicates(self):
         raw = alert()
