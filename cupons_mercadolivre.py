@@ -100,16 +100,16 @@ def alert_caption(alert):
 
     start = 0
     if source_lines:
-        heading = re.sub(r'^[^\\w]+', '', source_lines[0]).strip()
-        if re.fullmatch(r'mercado\\s+livre[ !:—-]*', heading, re.I):
+        heading = re.sub(r'^[^\w]+', '', source_lines[0]).strip()
+        if re.fullmatch(r'mercado\s+livre[ !:—-]*', heading, re.I):
             start = 1
         else:
-            selected = re.fullmatch(r'mercado\\s+livre\\s+em selecionados[ !:—-]*', heading, re.I)
+            selected = re.fullmatch(r'mercado\s+livre\s+em selecionados[ !:—-]*', heading, re.I)
             if selected:
                 start = 1
                 parts.append('Em selecionados!')
-            elif (re.search(r'\\b(?:cupom|cupons)\\b', heading, re.I)
-                  and re.search(r'\\bmercado\\s+livre\\b', heading, re.I)):
+            elif (re.search(r'\b(?:cupom|cupons)\b', heading, re.I)
+                  and re.search(r'\bmercado\s+livre\b', heading, re.I)):
                 start = 1
 
     for line in source_lines[start:]:
@@ -121,7 +121,6 @@ def alert_caption(alert):
         else:
             parts.append(html.escape(line))
 
-    parts.append('Confira validade, disponibilidade e regras de cada cupom no Mercado Livre.')
     parts.append('#anuncio')
     parts.append('Resgate aqui:\n' + html.escape(social_url()))
     return '\n\n'.join(parts)
