@@ -2,17 +2,36 @@
 import hashlib
 import html
 import json
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 import requests
 from mercadolivre_manual import allowed_link, trusted, key
 from ofertas_core import product
 from shopee_afiliados import AffiliateError
+
+DEFAULT_USER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+)
+
+
+def request_headers():
+    headers = {
+        'User-Agent': os.getenv('ML_AFFILIATE_USER_AGENT', DEFAULT_USER_AGENT),
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    }
+    cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+    if cookie and '\r' not in cookie and '\n' not in cookie and len(cookie) <= 100000:
+        headers['Cookie'] = cookie
+    return headers
+
 
 
 class Page(HTMLParser):
@@ -99,10 +118,16 @@ def identity(url):
     found = product(url)
     if found:
         return found[0]
-    # Páginas de produto do formato User Product também aparecem nos compartilhamentos ML.
-    match = re.search(r'/up/(MLBU\d+)(?:/|$)', urlsplit(url).path, re.I)
+    parsed = urlsplit(url)
+    query = parse_qs(parsed.query)
+    identity_text = ' '.join(
+        [parsed.path] + query.get('item_id', []) + query.get('pdp_filters', [])
+    )
+    match = re.search(r'MLB-?(\d+)', identity_text, re.I)
+    if match:
+        return 'MercadoLivre:' + match[1]
+    match = re.search(r'/up/(MLBU\d+)(?:/|$)', parsed.path, re.I)
     return match[1].upper() if match else None
-
 
 def extract_product(text, url):
     if not allowed_link(url) or not identity(url):
@@ -161,12 +186,15 @@ def fetch_http(url, transport=None):
     transport = transport or requests
     seen = set()
     for _ in range(7):
-        if not allowed_link(url) or url in seen:
-            raise AffiliateError('Redirecionamento ML externo ou circular.')
+        if not allowed_link(url):
+            host = urlsplit(url).hostname or 'inválido'
+            raise AffiliateError(f'Redirecionamento ML para domínio não permitido: {host}.')
+        if url in seen:
+            raise AffiliateError('Redirecionamento ML circular.')
         seen.add(url)
         try:
             with transport.get(url, allow_redirects=False, stream=True, timeout=(5, 10),
-                               headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'pt-BR,pt;q=0.9'}) as r:
+                               headers=request_headers()) as r:
                 if r.status_code in (301, 302, 303, 307, 308):
                     destination = r.headers.get('Location')
                     if not destination:
@@ -203,7 +231,30 @@ def fetch_browser(url):
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             try:
-                context = browser.new_context(locale='pt-BR', accept_downloads=False, service_workers='block')
+                context = browser.new_context(
+                    locale='pt-BR', accept_downloads=False, service_workers='block',
+                    user_agent=os.getenv('ML_AFFILIATE_USER_AGENT', DEFAULT_USER_AGENT),
+                    extra_http_headers={'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'},
+                )
+                cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+                if cookie:
+                    browser_cookies = []
+                    for piece in cookie.split(';'):
+                        if '=' not in piece:
+                            continue
+                        name, value = piece.strip().split('=', 1)
+                        if not name or name.startswith('__Host-'):
+                            continue
+                        for cookie_url in ('https://www.mercadolivre.com.br',
+                                           'https://mercadolivre.com.br',
+                                           'https://www.mercadolivre.com'):
+                            browser_cookies.append({'name': name, 'value': value,
+                                                    'url': cookie_url, 'secure': True})
+                    if browser_cookies:
+                        try:
+                            context.add_cookies(browser_cookies)
+                        except Exception:
+                            pass
                 # Navega somente na loja. Nenhuma automação de login/captcha ou compras.
                 def route(request_route):
                     req = request_route.request
