@@ -113,9 +113,56 @@ class CouponTests(unittest.TestCase):
             self.assertIn('&lt;', data['text'])
             self.assertIn('🔥 <b>Cupom Shopee</b>', data['text'])
             self.assertIn('#anuncio', data['text'])
-            self.assertIn('Resgate aqui:', data['text'])
-            self.assertIn('https://s.shopee.com.br/novo', data['text'])
+            self.assertNotIn('Resgate aqui:', data['text'])
+            self.assertNotIn('Confira os cupons disponíveis.', data['text'])
+            self.assertIn('<b>🎟️ Opção 1</b>\nhttps://s.shopee.com.br/novo', data['text'])
+            self.assertIn('🏷️ R$ 10 &lt; OFF', data['text'])
             self.assertNotIn('reply_markup', data)
+
+    def test_caption_places_each_link_directly_under_its_option(self):
+        ready = {
+            'entries': [
+                {'conditions': '', 'affiliate_url': 'https://s.shopee.com.br/9KiRALsiZB'},
+                {'conditions': '', 'affiliate_url': 'https://s.shopee.com.br/gQSqQUFRk'},
+            ]
+        }
+        rendered = coupons.alert_caption(ready)
+        expected = (
+            '🔥 <b>Cupom Shopee</b>\n\n'
+            '<b>🎟️ Opção 1</b>\n'
+            'https://s.shopee.com.br/9KiRALsiZB\n\n'
+            '<b>🎟️ Opção 2</b>\n'
+            'https://s.shopee.com.br/gQSqQUFRk\n\n'
+            'Confira validade, disponibilidade e regras de cada cupom na Shopee.\n\n'
+            '#anuncio'
+        )
+        self.assertEqual(rendered, expected)
+        self.assertNotIn('Resgate aqui:', rendered)
+        self.assertNotIn('Confira os cupons disponíveis.', rendered)
+
+    def test_caption_supports_value_percent_limit_and_other_explicit_conditions(self):
+        ready = {
+            'entries': [
+                {'conditions': 'R$ 25 OFF a partir de R$ 199',
+                 'affiliate_url': 'https://s.shopee.com.br/a'},
+                {'conditions': '10% OFF\nLimite de R$ 11 OFF',
+                 'affiliate_url': 'https://s.shopee.com.br/b'},
+                {'conditions': 'Frete grátis em itens selecionados\nVálido até 23h',
+                 'affiliate_url': 'https://s.shopee.com.br/c'},
+            ]
+        }
+        rendered = coupons.alert_caption(ready)
+        self.assertIn('🏷️ R$ 25 OFF a partir de R$ 199\n<b>🎟️ Opção 1</b>\nhttps://s.shopee.com.br/a', rendered)
+        self.assertIn('🏷️ 10% OFF\nLimite de R$ 11 OFF\n<b>🎟️ Opção 2</b>\nhttps://s.shopee.com.br/b', rendered)
+        self.assertIn('🏷️ Frete grátis em itens selecionados\nVálido até 23h\n<b>🎟️ Opção 3</b>\nhttps://s.shopee.com.br/c', rendered)
+
+    def test_condition_text_deduplicates_cleans_markdown_and_rejects_promotional_noise(self):
+        value = ('**🏷️ R$ 30 OFF acima de R$ 169**\n'
+                 'R$ 30 OFF acima de R$ 169\n'
+                 'Entre no nosso grupo Telegram\n'
+                 'Itens selecionados')
+        rendered = coupons.condition_text(value)
+        self.assertEqual(rendered, '🏷️ R$ 30 OFF acima de R$ 169\nItens selecionados')
 
     def test_no_send_without_generated_flag(self):
         with patch('requests.post') as post:
