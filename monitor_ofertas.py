@@ -107,14 +107,19 @@ async def main():
         if not requested:
             parser.error('Preencha TG_CHATS com IDs negativos ou @nomes da lista.')
         selected = []
+        missing = []
         for value in requested:
             match = next((d for d in dialogs if str(d.id) == value or
                           '@' + str(getattr(d.entity, 'username', '')).lower() == value.lower()), None)
             if not match:
-                parser.error('Chat não encontrado: ' + value + '. Confira o sinal de menos no ID.')
+                missing.append(value)
+                print('Chat configurado não encontrado; ignorando e mantendo os demais:', value)
+                continue
             if str(match.id) == os.getenv('TELEGRAM_CANAL', '') or ('@' + str(getattr(match.entity, 'username', '')).lower()) == os.getenv('TELEGRAM_CANAL', '').lower():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
+        if not selected:
+            parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
         allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
