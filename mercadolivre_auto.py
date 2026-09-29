@@ -353,42 +353,18 @@ def browser_social_featured(page, current):
                 const href = anchor ? anchor.href : (el.href || null);
                 const title = titleEl ? clean(titleEl.textContent) : '';
 
-                const moneyNodes = Array.from(
-                    node.querySelectorAll('.andes-money-amount')
-                ).map(amount => {
-                    const fractionEl =
-                        amount.querySelector('.andes-money-amount__fraction') ||
-                        amount.querySelector('[class*="money-amount__fraction"]');
-                    const centsEl =
-                        amount.querySelector('.andes-money-amount__cents') ||
-                        amount.querySelector('[class*="money-amount__cents"]');
-
-                    return {
-                        fraction: fractionEl ? clean(fractionEl.textContent) : '',
-                        cents: centsEl ? clean(centsEl.textContent) : ''
-                    };
-                }).filter(value => value.fraction);
-
-                if (!moneyNodes.length) {
-                    const fractions = Array.from(
-                        node.querySelectorAll(
-                            '.andes-money-amount__fraction, [class*="money-amount__fraction"]'
-                        )
-                    ).map(n => clean(n.textContent)).filter(Boolean);
-
-                    const cents = Array.from(
-                        node.querySelectorAll(
-                            '.andes-money-amount__cents, [class*="money-amount__cents"]'
-                        )
-                    ).map(n => clean(n.textContent)).filter(Boolean);
-
-                    for (let i = 0; i < fractions.length; i++) {
-                        moneyNodes.push({
-                            fraction: fractions[i],
-                            cents: cents[i] || ''
-                        });
-                    }
-                }
+                const currentPriceBlock = node.querySelector('.poly-price__current');
+                const currentAmount = currentPriceBlock
+                    ? currentPriceBlock.querySelector('.andes-money-amount:not(.andes-money-amount--previous)')
+                    : null;
+                const fractionEl = currentAmount
+                    ? currentAmount.querySelector('.andes-money-amount__fraction')
+                    : null;
+                const centsEl = currentAmount
+                    ? currentAmount.querySelector('.andes-money-amount__cents')
+                    : null;
+                const fraction = fractionEl ? clean(fractionEl.textContent) : '';
+                const cents = centsEl ? clean(centsEl.textContent) : '';
 
                 const imageCandidates = [];
                 for (const imgEl of node.querySelectorAll('img')) {
@@ -418,13 +394,12 @@ def browser_social_featured(page, current):
                     }
                 }
 
-                if (href && title && moneyNodes.length && imageCandidates.length) {
-                    const currentPrice = moneyNodes[moneyNodes.length - 1];
+                if (href && title && fraction && imageCandidates.length) {
                     return {
                         href,
                         title,
-                        fraction: currentPrice.fraction,
-                        cents: currentPrice.cents,
+                        fraction,
+                        cents,
                         imageCandidates
                     };
                 }
