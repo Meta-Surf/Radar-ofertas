@@ -181,6 +181,43 @@ class AutoMLTests(unittest.TestCase):
         wrapper += '<a href="' + DIRECT.replace('123456', '999999') + '">Outra</a>'
         self.assertIsNone(auto.next_destination(wrapper, URL))
 
+    def test_browser_social_destination_uses_unique_rendered_cta_href(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio'
+        page, context, locator, control = Mock(), Mock(), Mock(), Mock()
+        page.locator.return_value = locator
+        locator.filter.return_value = locator
+        locator.count.return_value = 1
+        locator.first = control
+        control.get_attribute.return_value = DIRECT
+        self.assertEqual(auto.browser_social_destination(page, context, social), DIRECT)
+        control.click.assert_not_called()
+
+    def test_browser_social_destination_blocks_ambiguous_cta(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio'
+        page, context, locator = Mock(), Mock(), Mock()
+        page.locator.return_value = locator
+        locator.filter.return_value = locator
+        locator.count.return_value = 2
+        with self.assertRaisesRegex(AffiliateError, 'único botão'):
+            auto.browser_social_destination(page, context, social)
+
+    def test_browser_social_destination_can_follow_click_navigation(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio'
+        page, context, locator, control = Mock(), Mock(), Mock(), Mock()
+        page.locator.return_value = locator
+        locator.filter.return_value = locator
+        locator.count.return_value = 1
+        locator.first = control
+        control.get_attribute.return_value = None
+        control.evaluate.return_value = None
+        type(page).url = property(lambda self: getattr(self, '_test_url', social))
+        page._test_url = social
+        context.pages = [page]
+        def clicked(*args, **kwargs):
+            page._test_url = DIRECT
+        control.click.side_effect = clicked
+        self.assertEqual(auto.browser_social_destination(page, context, social), DIRECT)
+
     def test_browser_fallback_fills_data_and_preserves_affiliate_url(self):
         found = auto.extract_product(document(), DIRECT)
         with patch.object(auto, 'fetch_http', side_effect=AffiliateError('HTTP 403')), \
