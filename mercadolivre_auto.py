@@ -38,7 +38,8 @@ class Page(HTMLParser):
     def __init__(self, text):
         super().__init__(convert_charrefs=True)
         self.documents, self.links, self.canonical = [], [], []
-        self.refresh, self._json = [], None
+        self.anchors = []
+        self.refresh, self._json, self._anchor = [], None, None
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
@@ -47,6 +48,8 @@ class Page(HTMLParser):
             self._json = ''
         if tag == 'a' and a.get('href'):
             self.links.append(a['href'])
+            if self._anchor is None:
+                self._anchor = {'href': a['href'], 'text': []}
         if tag == 'link' and a.get('rel') == 'canonical' and a.get('href'):
             self.canonical.append(a['href'])
         if tag == 'meta':
@@ -61,8 +64,13 @@ class Page(HTMLParser):
     def handle_data(self, data):
         if self._json is not None:
             self._json += data
+        if self._anchor is not None:
+            self._anchor['text'].append(data)
 
     def handle_endtag(self, tag):
+        if tag == 'a' and self._anchor is not None:
+            self.anchors.append((self._anchor['href'], ' '.join(self._anchor['text'])))
+            self._anchor = None
         if tag == 'script' and self._json is not None:
             try:
                 self.documents.append(json.loads(self._json))
@@ -185,11 +193,40 @@ def nested_official_urls(url):
     return list(dict.fromkeys(values))
 
 
+
+def social_page(url):
+    try:
+        return allowed_link(url) and urlsplit(url).path.lower().startswith('/social/')
+    except (ValueError, TypeError):
+        return False
+
+
+def featured_social_destination(text, current):
+    """Na vitrine Social, segue somente o CTA único do produto em destaque."""
+    if not social_page(current):
+        return None
+    page = Page(text)
+    candidates = []
+    for href, label in page.anchors:
+        label = re.sub(r'\s+', ' ', html.unescape(label)).strip()
+        if not re.search(r'\bir\s+para\s+(?:o\s+)?produto\b', label, re.I):
+            continue
+        target = urljoin(current, html.unescape(href).strip())
+        if allowed_link(target):
+            candidates.append(target)
+    candidates = list(dict.fromkeys(candidates))
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def next_destination(text, current):
     page = Page(text)
     redirects = list(dict.fromkeys(urljoin(current, x) for x in page.refresh))
     if len(redirects) == 1 and allowed_link(redirects[0]):
         return redirects[0]
+    if social_page(current):
+        # Não escolhe itens da grade "Para você/Mais vendidos/Ofertas".
+        # Somente o CTA único do destaque principal é aceito.
+        return featured_social_destination(text, current)
     # Uma página de produto direta não deve trocar para recomendações.
     direct = product(current) or re.search(r'/up/MLBU\d+(?:/|$)', urlsplit(current).path, re.I)
     if direct:

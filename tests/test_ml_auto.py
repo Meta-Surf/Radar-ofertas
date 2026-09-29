@@ -131,6 +131,49 @@ class AutoMLTests(unittest.TestCase):
         session.cookies.set.assert_any_call('foo', 'bar')
         session.cookies.set.assert_any_call('session', 'abc123')
 
+    def test_social_profile_uses_only_unique_featured_product_cta(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio'
+        featured = DIRECT
+        grid = DIRECT.replace('123456', '999999')
+        text = (
+            '<section><a href="' + featured + '"><span>Ir para produto</span></a></section>'
+            '<div><a href="' + grid + '">Outro produto da grade</a></div>'
+        )
+        self.assertTrue(auto.social_page(social))
+        self.assertEqual(auto.featured_social_destination(text, social), featured)
+        self.assertEqual(auto.next_destination(text, social), featured)
+
+    def test_social_profile_blocks_missing_or_ambiguous_featured_cta(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio'
+        other = DIRECT.replace('123456', '999999')
+        no_cta = '<a href="' + DIRECT + '">Produto da grade</a>'
+        ambiguous = (
+            '<a href="' + DIRECT + '">Ir para produto</a>'
+            '<a href="' + other + '"><span>Ir para o produto</span></a>'
+        )
+        self.assertIsNone(auto.featured_social_destination(no_cta, social))
+        self.assertIsNone(auto.next_destination(no_cta, social))
+        self.assertIsNone(auto.featured_social_destination(ambiguous, social))
+        self.assertIsNone(auto.next_destination(ambiguous, social))
+
+    def test_http_short_link_social_featured_then_product(self):
+        social = 'https://www.mercadolivre.com.br/social/bebidastaio?ref=x'
+        social_html = (
+            '<a href="' + DIRECT + '"><strong>Ir para produto</strong></a>'
+            '<a href="' + DIRECT.replace('123456', '999999') + '">Produto da grade</a>'
+        )
+        transport = Mock()
+        transport.get.side_effect = [
+            response(301, headers={'Location': social}),
+            response(text=social_html),
+            response(text=document()),
+        ]
+        result = auto.fetch_http(URL, transport)
+        self.assertEqual(result['name'], DATA['name'])
+        self.assertEqual(result['price'], '199,90')
+        self.assertEqual(result['resolved_url'], DIRECT)
+        self.assertEqual(transport.get.call_count, 3)
+
     def test_wrapper_only_follows_one_product_never_recommendation(self):
         wrapper = '<a href="' + DIRECT + '">Câmera</a>'
         self.assertEqual(auto.next_destination(wrapper, URL), DIRECT)
