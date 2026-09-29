@@ -43,6 +43,13 @@ def key(url):
     return 'MLManual:' + hashlib.sha256(url.encode()).hexdigest()
 
 
+def pending_key(url):
+    """Identificador temporário de oferta ML ainda não resolvida pelo monitor."""
+    if not allowed_link(url):
+        return None
+    return 'MercadoLivrePending:' + hashlib.sha256(url.encode()).hexdigest()
+
+
 def build_offer(messages, chat):
     if not trusted(chat):
         return None
