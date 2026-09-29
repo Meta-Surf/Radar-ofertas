@@ -300,6 +300,230 @@ def fetch_http(url, transport=None):
     raise AffiliateError('Limite de redirecionamentos ML atingido.')
 
 
+
+def browser_social_destination(page, context, current):
+    """Resolve o CTA renderizado do destaque do Perfil Social."""
+    if not social_page(current):
+        return None
+    try:
+        matches = page.locator('a, button').filter(
+            has_text=re.compile(r'^\\s*Ir\\s+para\\s+(?:o\\s+)?produto\\s*    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise AffiliateError('Instale a leitura automática: py -m pip install -r requirements.txt e py -m playwright install chromium') from None
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(
+                    locale='pt-BR', accept_downloads=False, service_workers='block',
+                    user_agent=os.getenv('ML_AFFILIATE_USER_AGENT', DEFAULT_USER_AGENT),
+                    extra_http_headers={'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'},
+                )
+                cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+                if cookie:
+                    browser_cookies = []
+                    for piece in cookie.split(';'):
+                        if '=' not in piece:
+                            continue
+                        name, value = piece.strip().split('=', 1)
+                        if not name or name.startswith('__Host-'):
+                            continue
+                        for cookie_url in ('https://www.mercadolivre.com.br',
+                                           'https://mercadolivre.com.br',
+                                           'https://www.mercadolivre.com'):
+                            browser_cookies.append({'name': name, 'value': value,
+                                                    'url': cookie_url, 'secure': True})
+                    if browser_cookies:
+                        try:
+                            context.add_cookies(browser_cookies)
+                        except Exception:
+                            pass
+                # Navega somente na loja. Nenhuma automação de login/captcha ou compras.
+                def route(request_route):
+                    req = request_route.request
+                    if req.is_navigation_request() and not allowed_link(req.url):
+                        request_route.abort()
+                    elif req.resource_type in {'image', 'media', 'font'}:
+                        request_route.abort()
+                    else:
+                        request_route.continue_()
+                context.route('**/*', route)
+                page = context.new_page()
+                page.set_default_timeout(5000)
+                seen = set()
+                for _ in range(4):
+                    if not allowed_link(url) or url in seen:
+                        raise AffiliateError('Navegação ML externa ou circular.')
+                    seen.add(url)
+                    response = page.goto(url, wait_until='domcontentloaded', timeout=20000)
+                    if response and response.status >= 400:
+                        raise AffiliateError(f'Navegador ML retornou HTTP {response.status}; nenhuma oferta publicada.')
+                    # Aguarda dados carregados por JS, com prazo limitado.
+                    try:
+                        page.wait_for_function("!!document.querySelector('script[type=\"application/ld+json\"]')", timeout=5000)
+                    except Exception:
+                        pass
+                    current, text = page.url, page.content()
+                    if not allowed_link(current):
+                        raise AffiliateError('Navegador saiu do domínio permitido.')
+                    if social_page(current):
+                        target = browser_social_destination(page, context, current)
+                        if not target:
+                            raise AffiliateError('Perfil Social sem produto em destaque identificável.')
+                        url = target
+                        continue
+                    try:
+                        return extract_product(text, current)
+                    except AffiliateError:
+                        target = next_destination(text, current)
+                        if not target:
+                            raise
+                        url = target
+                raise AffiliateError('Destino ML não identificado pelo navegador.')
+            finally:
+                browser.close()
+    except AffiliateError:
+        raise
+    except Exception:
+        raise AffiliateError('Navegador ML indisponível ou página bloqueada. Instale Chromium: py -m playwright install chromium') from None
+
+
+def enrich(offer):
+    manual = offer.get('kind') == 'ml_manual_offer'
+    automatic = offer.get('kind') == 'ml_offer' and offer.get('source') == 'telegram'
+    if manual:
+        authorized = (trusted(offer.get('chat_id')) and allowed_link(offer.get('url'))
+                      and offer.get('product_id') == key(offer['url']))
+    elif automatic:
+        identified = product(offer.get('url', ''))
+        authorized = bool(identified and identified[1] == 'Mercado Livre'
+                          and offer.get('product_id') == identified[0])
+    else:
+        authorized = False
+    if not authorized:
+        raise AffiliateError('Origem ML não autorizada para leitura automática.')
+    try:
+        found = fetch_http(offer['url'])
+    except AffiliateError as http_error:
+        try:
+            found = fetch_browser(offer['url'])
+        except AffiliateError as browser_error:
+            raise AffiliateError(str(http_error) + ' ' + str(browser_error)) from None
+    # Preço escrito pelo operador continua prevalecendo. Completa somente ausências.
+    result = dict(offer, resolved_url=found['resolved_url'], auto_fetched_at=found['auto_fetched_at'])
+    if not result.get('name'):
+        result['name'] = found['name']
+    if not result.get('price'):
+        result.update({k: found[k] for k in ('price', 'price_condition', 'price_from')})
+    if not result.get('image') and not result.get('api_image'):
+        result['api_image'] = found['api_image']
+    return result
+
+
+class AutoReader:
+    """Uma consulta em segundo plano; não para capturas nem outras publicações."""
+    def __init__(self):
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ml-auto')
+        self.jobs, self.cache = {}, {}
+
+    def read(self, offer, blocking=False):
+        if blocking:
+            return enrich(offer)
+        fingerprint = hashlib.sha256(json.dumps(offer, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        now = time.monotonic()
+        self.cache = {k: v for k, v in self.cache.items() if now - v[0] < 300}
+        for identity, pending in list(self.jobs.items()):
+            if pending.done():
+                del self.jobs[identity]
+                try:
+                    value = pending.result()
+                except AffiliateError as error:
+                    value = error
+                except Exception:
+                    value = AffiliateError('Falha inesperada na leitura ML; aguardando nova tentativa.')
+                self.cache[identity] = (now, value)
+        while len(self.cache) > 128:
+            self.cache.pop(next(iter(self.cache)))
+        if fingerprint in self.cache:
+            value = self.cache[fingerprint][1]
+            if isinstance(value, Exception):
+                raise value
+            return dict(value)
+        job = self.jobs.get(fingerprint)
+        if job is None:
+            if len(self.jobs) >= 4:
+                return None
+            self.jobs[fingerprint] = self.executor.submit(enrich, dict(offer))
+            return None
+        return None
+
+    def close(self):
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def main():
+    import argparse
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from dotenv import load_dotenv
+    from mercadolivre_manual import chat_id
+    load_dotenv(Path(__file__).resolve().parent / '.env', encoding='utf-8-sig')
+    parser = argparse.ArgumentParser(description='Diagnostica um link ML; não publica nem escreve na fila.')
+    parser.add_argument('--testar', required=True, metavar='URL')
+    args = parser.parse_args()
+    row = dict(kind='ml_manual_offer', source='telegram', chat_id=chat_id(), url=args.testar,
+               product_id=key(args.testar), source_date=datetime.now(timezone.utc).isoformat())
+    try:
+        result = enrich(row)
+    except AffiliateError as error:
+        parser.exit(1, str(error) + '\nNada foi publicado.\n')
+    print('Produto:', result['name'])
+    print('Preço:', result['price'], '|', result.get('price_condition', ''))
+    print('Imagem:', bool(result.get('api_image')))
+    print('Link original preservado:', result['url'] == args.testar)
+    print('Nada foi publicado. Reinicie monitor e publicador para usar a captura automática.')
+
+
+if __name__ == '__main__':
+    main()
+, re.I)
+        )
+        if matches.count() != 1:
+            raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
+        control = matches.first
+        href = control.get_attribute('href')
+        if not href:
+            try:
+                href = control.evaluate("(el) => { const a = el.closest('a'); return a ? a.href : null; }")
+            except Exception:
+                href = None
+        if href:
+            target = urljoin(current, href)
+            if not allowed_link(target):
+                raise AffiliateError('Botão do destaque aponta para domínio não permitido.')
+            return target
+
+        before = page.url
+        pages_before = list(context.pages)
+        control.click(timeout=5000)
+        try:
+            page.wait_for_load_state('domcontentloaded', timeout=10000)
+        except Exception:
+            pass
+        after = page.url
+        if after != before and allowed_link(after):
+            return after
+        for candidate_page in context.pages:
+            if candidate_page not in pages_before and allowed_link(candidate_page.url):
+                return candidate_page.url
+        raise AffiliateError('Botão "Ir para produto" não revelou um destino navegável.')
+    except AffiliateError:
+        raise
+    except Exception:
+        raise AffiliateError('Não foi possível resolver o botão "Ir para produto" do Perfil Social.') from None
+
+
 def fetch_browser(url):
     try:
         from playwright.sync_api import sync_playwright
