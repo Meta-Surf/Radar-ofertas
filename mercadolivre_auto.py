@@ -339,7 +339,7 @@ def browser_social_featured(page, current):
         if len(selected) != 1:
             raise AffiliateError('Perfil Social sem um único botão "Ir para produto" no destaque.')
         control = selected[0]
-        data = control.evaluate("""(el) => {
+        data = control.evaluate(r"""(el) => {
             const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
             let node = el;
             for (let level = 0; level < 9 && node; level++, node = node.parentElement) {
