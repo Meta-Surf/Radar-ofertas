@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import canal_espelho as mirror
 from shopee_afiliados import AffiliateError
 import bot_ofertas_revisao as publisher
+import monitor_ofertas as monitor
 from unittest.mock import Mock, patch
 
 
@@ -97,6 +98,38 @@ class CanalEspelhoTests(unittest.TestCase):
         self.assertIn(affiliate, data["text"])
         self.assertNotIn(mirror.PLACEHOLDER, data["text"])
         self.assertNotIn("reply_markup", data)
+
+
+    def test_produto_com_codigo_de_cupom_nao_vira_alerta_separado(self):
+        source = "https://shopee.com.br/product/123/456"
+        msg = message(
+            "🔥 Air Fryer em oferta\n"
+            "✅ R$ 233,00 à vista com cupom: MELIDATADUPLA\n"
+            "👉 Link: " + source
+        )
+        fake_alerts = [{"kind": "coupon_alert", "entries": [{"url": source}]}]
+        self.assertFalse(
+            monitor.exclusive_coupon_message(msg.raw_text, [msg], fake_alerts, None)
+        )
+
+    def test_mensagem_exclusiva_de_cupons_mantem_fluxo_da_arte(self):
+        msg = message(
+            "🔥 CUPONS SHOPEE\n"
+            "🏷️ 10% OFF em selecionados\n"
+            "👉 Resgate aqui: https://s.shopee.com.br/cupom123"
+        )
+        fake_alerts = [{"kind": "coupon_alert", "entries": [{"url": "https://s.shopee.com.br/cupom123"}]}]
+        self.assertTrue(
+            monitor.exclusive_coupon_message(msg.raw_text, [msg], fake_alerts, None)
+        )
+
+    def test_link_direto_de_produto_sem_preco_tambem_nao_vira_alerta(self):
+        source = "https://shopee.com.br/product/123/456"
+        msg = message("🔥 Produto com cupom: TESTE10\n👉 Link: " + source)
+        fake_alerts = [{"kind": "coupon_alert", "entries": [{"url": source}]}]
+        self.assertFalse(
+            monitor.exclusive_coupon_message(msg.raw_text, [msg], fake_alerts, None)
+        )
 
 
 if __name__ == "__main__":
