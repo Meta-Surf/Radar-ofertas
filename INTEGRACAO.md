@@ -1,4 +1,4 @@
-> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 1200 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
 
 # Cupons + grupos + radar Shopee
 
@@ -35,7 +35,7 @@ presente no exemplo, só é aceito quando revela um destino Shopee por HTTP.
 Páginas que exigem JavaScript ou bloqueiam a resolução ficam pendentes.
 
 Cupons entram na mesma prioridade das ofertas dos grupos, sem aguardar o
-relógio de 10 minutos do radar. A identidade do alerta usa destinos resolvidos,
+relógio de 20 minutos do radar. A identidade do alerta usa destinos resolvidos,
 condições e data de origem; avisos iguais no mesmo dia não são reenviados,
 inclusive após reiniciar. Os limites de espera pedidos pelo Telegram continuam
 valendo para todos. Alertas com condições ou datas diferentes são novos avisos.
@@ -75,7 +75,7 @@ Se preferir iniciar manualmente, execute cada comando em uma janela na mesma pas
 
 ```powershell
 py -u monitor_ofertas.py
-py -u radar_shopee_continuo.py --enfileirar --loop --intervalo 600 --limite 3
+py -u radar_shopee_continuo.py --enfileirar --loop --intervalo 1200 --limite 3
 py -u bot_ofertas_revisao.py
 ```
 
@@ -85,7 +85,7 @@ O último comando publica de verdade no `TELEGRAM_CANAL` do `.env`. Para conferi
 
 O monitor usa `TG_API_ID`, `TG_API_HASH` e `TG_CHATS`. Se a sessão ainda não estiver autenticada, siga o pedido de login na janela do monitor. `py monitor_ofertas.py --listar` mostra os chats disponíveis (execute com o monitor parado). Não inclua o canal de destino nos chats de origem. Fotos dos grupos só são reutilizadas conforme `TG_MEDIA_CHATS`; quando disponível, o publicador usa a imagem oficial da API.
 
-O publicador utiliza `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`, `TELEGRAM_TOKEN` e `TELEGRAM_CANAL` já configurados. No modo integrado, as ofertas de grupos não aguardam intervalo programado. O radar respeita 600 segundos entre tentativas de publicação. O antigo `INTERVALO_PUBLICACOES` não controla mais esse publicador.
+O publicador utiliza `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`, `TELEGRAM_TOKEN` e `TELEGRAM_CANAL` já configurados. No modo integrado, as ofertas de grupos não aguardam intervalo programado. O radar respeita 1200 segundos (20 minutos) entre tentativas de publicação. O antigo `INTERVALO_PUBLICACOES` não controla mais esse publicador.
 
 ## Fluxo
 
@@ -93,7 +93,7 @@ O publicador utiliza `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`, `TELEGRA
 - O radar mantém os 22 temas e filtros atuais; atualiza `fila_shopee_api.jsonl` a cada rodada com até três candidatos, sem enviar ao Telegram.
 - O publicador lê as duas filas, dá prioridade absoluta às ofertas dos grupos e usa o radar quando não há oferta captada elegível. Ofertas dos grupos são consideradas das mais recentes para as mais antigas.
 - Cada link é gerado pela API com suas credenciais de afiliado; não reutiliza o link de afiliado do grupo. Não conseguir identificar o produto ou gerar seu link impede o envio.
-- As duas fontes compartilham o histórico por loja e produto, inclusive depois de reiniciar ou mudar o dia. O relógio de dez minutos é registrado somente antes de cada tentativa do radar. Envios de grupos não reiniciam esse relógio nem esperam sua liberação.
+- As duas fontes compartilham o histórico por loja e produto, inclusive depois de reiniciar ou mudar o dia. O relógio de vinte minutos é registrado somente antes de cada tentativa do radar. Envios de grupos não reiniciam esse relógio nem esperam sua liberação.
 - O radar revalida preço e critérios da API. As ofertas dos grupos preservam preço/cupom captados; não passam pelos mesmos filtros de nota/vendas/desconto do radar. Esse preço não é verificado no checkout, conforme a decisão de manter o comportamento atual.
 - Reservas de envio incerto ficam bloqueadas para evitar repetição; confira o canal se ocorrer timeout.
 
@@ -101,7 +101,7 @@ As travas locais impedem duas instâncias novas do mesmo componente na mesma pas
 
 ## Verificação
 
-O monitor mostra `Monitorando ... chats` e `Oferta captada`. O radar mostra `Fila do radar atualizada`. O publicador mostra `Publicado ... origem: telegram` ou `origem: radar`. As filas são verificadas aproximadamente a cada segundo. Gerar o link e enviar depende das APIs: imediato significa sem espera programada de minutos. Uma oferta de grupo recebida durante uma requisição em andamento é processada quando ela termina. O radar pode esperar mais de dez minutos quando há ofertas de grupos pendentes. Se o Telegram rejeitar um envio e solicitar pausa, ela se aplica a ambas as fontes.
+O monitor mostra `Monitorando ... chats` e `Oferta captada`. O radar mostra `Fila do radar atualizada`. O publicador mostra `Publicado ... origem: telegram` ou `origem: radar`. As filas são verificadas aproximadamente a cada segundo. Gerar o link e enviar depende das APIs: imediato significa sem espera programada de minutos. Uma oferta de grupo recebida durante uma requisição em andamento é processada quando ela termina. O radar pode esperar mais de vinte minutos quando há ofertas de grupos pendentes. Se o Telegram rejeitar um envio e solicitar pausa, ela se aplica a ambas as fontes.
 
 Testes locais: `py -m unittest discover -p "test_*.py" -v`. Os testes usam dados simulados; login, acesso real aos grupos e APIs precisam ser conferidos no computador de execução.
 
@@ -140,6 +140,5 @@ monitor e execute `py monitor_ofertas.py --listar`. O diagnóstico de uma
 publicação mostra também `Modo espelho: True` quando a origem estiver
 configurada corretamente.
 
-> Esta implementação não altera o intervalo do radar contínuo. A mudança de
-> 10 para 20 minutos deve ser aplicada separadamente depois de validar o canal
-> espelho.
+> O canal espelho mantém prioridade de publicação. O radar contínuo da Shopee
+> usa intervalo de 20 minutos entre tentativas de publicação.
