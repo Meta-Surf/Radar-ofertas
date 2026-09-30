@@ -18,7 +18,7 @@ TAG_RE = re.compile(r"<[^>]+>")
 ANCHOR_RE = re.compile(r'<a href="([^"]+)">(.*?)</a>', re.I | re.S)
 SOCIAL_LINE_RE = re.compile(
     r"(?i)\b(?:instagram|telegram|whatsapp|youtube|tiktok|facebook|twitter|"
-    r"grupo|canal|rede social|siga(?:-nos)?|entre no grupo)\b|(?<!\w)@\w{3,}"
+    r"grupo|canal|rede social|siga(?:-nos)?|entre no grupo|site|p[aá]gina|saiba mais|veja mais|acesse)\\b|(?<!\\w)@\\w{3,}"
 )
 
 
