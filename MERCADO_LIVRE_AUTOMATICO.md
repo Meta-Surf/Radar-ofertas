@@ -1,5 +1,7 @@
 # Publicação automática a partir do link Mercado Livre
 
+> Guia funcional atual. Para a sequência completa de inicialização, use [docs/operacao.md](docs/operacao.md).
+
 No grupo -1003988174916, o operador pode enviar somente seu link de produto. O
 monitor coloca a mensagem na fila; o publicador busca título, preço público e
 imagem, prepara a mensagem e envia com o endereço de afiliado original.
@@ -19,8 +21,8 @@ Alternativa ao instalador, no PowerShell dentro de BOPT:
     py -m playwright install chromium
 
 Mensagens recentes que já estiverem na fila podem ser completadas automaticamente.
-Mensagens antes rejeitadas e ausentes da fila precisam ser enviadas novamente ou
-editadas com o monitor ligado. Não há varredura do histórico do grupo.
+Mensagens antes rejeitadas e fora da janela de recuperação precisam ser enviadas novamente ou
+editadas. Ao reiniciar, o monitor pode reprocessar mensagens recentes conforme TG_RECUPERAR_MINUTOS; não há varredura ilimitada do histórico.
 
 ## Comportamento
 
