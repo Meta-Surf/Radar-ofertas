@@ -19,6 +19,7 @@ from cupons_mercadolivre import build_alert as build_ml_alert
 import mercadolivre_manual as ml_manual
 from shopee_afiliados import AffiliateError
 import canal_espelho as mirror
+import imagem_marca as image_branding
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -229,6 +230,8 @@ async def main():
             parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
         allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
         allowed_media.update(str(chat_id) for chat_id in mirror_chat_ids)
+        # Canais com rebranding precisam da foto original para gerar a versão limpa.
+        allowed_media.update(image_branding.configured_chats())
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
 
@@ -250,6 +253,7 @@ async def main():
             print('Está em TG_CHATS:', dialog.id in selected)
             print('Imagens autorizadas em TG_MEDIA_CHATS:', str(dialog.id) in allowed_media)
             print('Modo espelho:', dialog.id in mirror_chat_ids)
+            print('Rebranding visual:', image_branding.enabled(dialog.id))
             message = await client.get_messages(dialog.entity, ids=int(match[2]))
             if not message:
                 print('Mensagem não encontrada ou indisponível para sua conta.')
@@ -303,6 +307,38 @@ async def main():
         media_dir = BASE / 'imagens_ofertas'
         media_dir.mkdir(exist_ok=True)
 
+        async def save_offer_photo(photo, chat_id):
+            """Baixa foto autorizada e aplica rebranding quando a origem exigir."""
+            target = media_dir / f'{chat_id}_{photo.id}.jpg'
+            try:
+                downloaded = await client.download_media(photo, file=str(target))
+                if not downloaded or not target.exists() or not (0 < target.stat().st_size <= 10_000_000):
+                    if target.exists():
+                        target.unlink()
+                    return None
+                if image_branding.enabled(chat_id):
+                    try:
+                        await asyncio.to_thread(image_branding.apply, target)
+                        print('Imagem com rebranding aplicado:', chat_id, photo.id)
+                    except Exception as error:
+                        # Nunca publica a arte original quando esse canal exige limpeza.
+                        if target.exists():
+                            target.unlink()
+                        logging.warning(
+                            'Rebranding visual falhou no chat %s, foto %s: %s',
+                            chat_id, photo.id, type(error).__name__,
+                        )
+                        return None
+                return str(target.relative_to(BASE))
+            except Exception:
+                if target.exists():
+                    try:
+                        target.unlink()
+                    except OSError:
+                        pass
+                logging.warning('Imagem indisponível na mensagem %s.', photo.id)
+                return None
+
         revisions = CaptureRevisions()
         capture_lock = asyncio.Lock()
 
@@ -336,13 +372,9 @@ async def main():
                     return
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    try:
-                        target = media_dir / f'{chat_id}_{photo.id}.jpg'
-                        downloaded = await client.download_media(photo, file=str(target))
-                        if downloaded and target.exists() and 0 < target.stat().st_size <= 10_000_000:
-                            row['image'] = str(target.relative_to(BASE))
-                    except Exception:
-                        logging.warning('Imagem manual indisponível na mensagem %s.', photo.id)
+                    downloaded_image = await save_offer_photo(photo, chat_id)
+                    if downloaded_image:
+                        row['image'] = downloaded_image
                 row['capture_digest'] = digest
                 row['recovered'] = recovered
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
@@ -380,15 +412,7 @@ async def main():
                 image = None
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    try:
-                        target = media_dir / f'{chat_id}_{photo.id}.jpg'
-                        downloaded = await client.download_media(photo, file=str(target))
-                        if downloaded and target.exists() and 0 < target.stat().st_size <= 10_000_000:
-                            image = str(target.relative_to(BASE))
-                        elif target.exists():
-                            target.unlink()
-                    except Exception:
-                        logging.warning('Imagem espelho indisponível na mensagem %s.', photo.id)
+                    image = await save_offer_photo(photo, chat_id)
                 captured_price = price_info(text) or {}
                 title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
                 title = next((line for line in title_lines if line and not re.search(r'https?://|R\\$|[💵💰💸]', line)), '')
@@ -449,15 +473,7 @@ async def main():
             if str(chat_id) in allowed_media:
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    try:
-                        target = media_dir / f'{chat_id}_{photo.id}.jpg'
-                        downloaded = await client.download_media(photo, file=str(target))
-                        if downloaded and target.exists() and 0 < target.stat().st_size <= 10_000_000:
-                            image = str(target.relative_to(BASE))
-                        elif target.exists():
-                            target.unlink()
-                    except Exception:
-                        logging.warning('Imagem indisponível na mensagem %s.', photo.id)
+                    image = await save_offer_photo(photo, chat_id)
             captured_price = price_info(text) or {}
             title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
             title = next((line for line in title_lines
