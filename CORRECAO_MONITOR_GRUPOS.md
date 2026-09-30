@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO.** Registra uma correção incremental de 27/09/2026. A recuperação automática, canal espelho e demais regras atuais estão em [docs/operacao.md](docs/operacao.md).
+
 # Correção do monitor de grupos — 27/09/2026
 
 ## Problemas reproduzidos
