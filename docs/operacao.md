@@ -88,6 +88,33 @@ py monitor_ofertas.py --diagnosticar https://t.me/NOME_DO_CANAL/NUMERO
 
 O resultado deve indicar `Modo espelho: True`.
 
+## Rebranding visual de imagens
+
+Alguns canais de origem imprimem a própria marca e um valor dentro da foto. Para essas origens, configure o ID numérico em:
+
+```env
+TG_REBRAND_CHATS=
+```
+
+O monitor baixa a imagem autorizada, cobre a faixa superior com o banner **RADAR DE OFERTAS** e cobre o selo de preço da origem com **preço atual na mensagem**. O preço não é reimpresso na imagem: a legenda continua sendo a fonte do valor publicado e evita divergência quando a arte do terceiro estiver desatualizada.
+
+Os padrões atuais foram ajustados para o layout do canal **Desconto em Games**:
+
+```env
+TG_REBRAND_TOP_RATIO=0.19
+TG_REBRAND_PRICE_BOX=0.64,0.77,0.98,0.95
+```
+
+Se o rebranding falhar, a imagem original desse canal não é publicada. Com `EXIGIR_IMAGEM=1`, a oferta fica aguardando uma imagem tratada em vez de vazar a marca/preço da origem.
+
+Para descobrir o ID correto:
+
+```powershell
+py monitor_ofertas.py --listar
+```
+
+Depois de configurar, `--diagnosticar` deve mostrar `Rebranding visual: True` para uma mensagem do canal.
+
 ## Shopee
 
 Credenciais:
