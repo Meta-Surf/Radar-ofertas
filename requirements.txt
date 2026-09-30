@@ -1,6 +1,7 @@
 telethon>=1.45,<2
 python-dotenv>=1.2,<2
 requests>=2.32,<3
+Pillow>=10,<13
 tzdata
 Flask>=3,<4
 
