@@ -1,5 +1,7 @@
 # Entrada manual Mercado Livre — grupo -1003988174916
 
+> Guia funcional atual. Para inicialização, recuperação e prioridades, use [docs/operacao.md](docs/operacao.md).
+
 ATUALIZAÇÃO: agora mensagens somente com link podem ser completadas automaticamente.
 Instale instalar_ml_automatico.cmd e siga MERCADO_LIVRE_AUTOMATICO.md. O formato
 com dados explícitos abaixo continua aceito como alternativa.
@@ -41,8 +43,8 @@ Para cupons, compartilhe a lista com os códigos, condições e, se desejar, seu
 Mercado Livre. A lista sai inteira, com a arte quando couber na legenda. Todos os alertas de cupons incluem seu Social diretamente no texto, sem botões;
 links da origem são descartados. Veja CUPONS_SOCIAL_NO_TEXTO.md.
 
-Só mensagens novas e edições recebidas enquanto o monitor estiver ativo serão
-captadas. Não percorre todo o histórico. Não realiza publicações de teste reais.
+Mensagens novas e edições são captadas ao vivo. Após reinício, mensagens recentes também podem
+ser recuperadas conforme TG_RECUPERAR_MINUTOS. O monitor não percorre todo o histórico. Não realiza publicações de teste reais.
 
 ## Validação
 
