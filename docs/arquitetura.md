@@ -1,30 +1,63 @@
-> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](../ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
+# Arquitetura atual — 30/09/2026
 
-# Arquitetura
+## Visão geral
 
-## Fluxo Shopee e Telegram
+O projeto separa captura, descoberta, enriquecimento, geração de afiliado e publicação. O objetivo é impedir que uma falha em uma loja ou origem provoque publicação incorreta em outra.
 
-1. `monitor_ofertas.py` recebe mensagens novas dos chats configurados via Telethon e extrai candidatos.
-2. `ofertas_core.py` centraliza identificação de produtos, dados das ofertas e registro diário de publicação.
-3. A fila local `fila_ofertas_v2.jsonl` conecta o monitor ao publicador.
-4. `bot_ofertas_revisao.py` filtra candidatos e chama `shopee_afiliados.py` para gerar o link afiliado e consultar dados do produto.
-5. O publicador envia a oferta ao canal pela API do bot. O SQLite registra reservas/publicações para evitar repetição diária.
+## Telegram
 
-Falhas na geração do link impedem a publicação. Uma resposta incerta do Telegram preserva a reserva para evitar reenvios. O dia é calculado em `America/Sao_Paulo`.
+`monitor_ofertas.py` usa Telethon para:
 
-## Componentes experimentais
+- monitorar `TG_CHATS` e `TG_ESPELHO_CHATS`;
+- processar mensagens novas, álbuns e edições;
+- recuperar mensagens recentes ao reiniciar;
+- reconhecer ofertas e mensagens exclusivas de cupons;
+- baixar mídia autorizada;
+- gravar candidatos em `fila_ofertas_v2.jsonl`.
 
-`mercadolivre_auth.py` auxilia no OAuth local. `radar_mercadolivre_v6.py` consulta anúncios configurados e pode usar links afiliados previamente mapeados. Essa parte é independente do publicador Shopee; não oferece geração automática de links afiliados Mercado Livre. Alguns acessos a itens ainda retornam HTTP 403.
+`CaptureRevisions` e `monitor_recuperacao.json` reduzem duplicação por reprocessamento.
 
-Amazon, Instagram e WhatsApp permanecem pendentes.
+### Modo espelho
 
-## Dados e execução
+`canal_espelho.py` preserva texto/formatação da origem especial, remove redes sociais/páginas informativas e substitui somente o link de produto. Links da mesma loja que não resolvem para produto, como páginas promocionais Shopee VIP, são descartados.
 
-Execute os comandos na raiz do projeto. Credenciais, sessão, filas, imagens coletadas e banco permanecem no computador de execução e estão excluídos do Git. O GitHub armazena código e documentação; enviar o projeto não inicia os bots nem mantém o computador ligado.
+## Shopee
 
-A automação do GitHub executa somente testes com serviços simulados. Não necessita de secrets de produção.
+`radar_shopee_continuo.py` consulta os 43 temas definidos em `radar_categorias.json` e alimenta a fila persistente de inteligência.
 
-## Descoberta direta Shopee
+`bot_ofertas_revisao.py` revalida ofertas, gera o link via `shopee_afiliados.py` e publica. O relógio exclusivo do radar é de 1200 segundos. Ofertas dos grupos/canais não aguardam esse relógio.
 
-`radar_shopee.py` consulta produtos e substitui atomicamente `fila_shopee_api.jsonl`. O publicador lê ambas as filas e usa o mesmo registro diário. Ofertas da API são revalidadas antes da geração do link. Consulte [o guia do radar](radar-shopee.md).
+## Mercado Livre
 
+Fluxos atuais:
+
+1. **grupos monitorados**: o link é normalizado para um produto e `mercadolivre_afiliados.py` tenta gerar o novo link pela sessão do Link Builder;
+2. **entrada manual**: `mercadolivre_manual.py` preserva o link fornecido pelo operador no grupo autorizado;
+3. **leitura automática**: `mercadolivre_auto.py` tenta completar título, preço e imagem sem usar parcela como preço total;
+4. **cupons**: `cupons_mercadolivre.py` monta a publicação própria de listas exclusivas.
+
+O OAuth em `mercadolivre_auth.py` permanece útil para experimentos/API, mas não é o mecanismo usado pela geração de afiliado.
+
+## Cupons
+
+`cupons_shopee.py` e `cupons_mercadolivre.py` são acionados somente para mensagens dedicadas a cupons. Um código de cupom dentro de uma oferta de produto permanece no texto da própria oferta e não gera outra postagem.
+
+## KaBuM / Awin
+
+`radar_kabum.py` é independente do publicador principal nesta fase. Ele:
+
+- aceita Product Feed direto ou Product Feed List;
+- seleciona o feed KaBuM;
+- mantém cache local;
+- grava produtos e histórico em SQLite;
+- identifica quedas comprovadas.
+
+O módulo ainda não envia ao Telegram.
+
+## Persistência
+
+`publicacoes.sqlite3` armazena reservas, publicações, relógios e dados usados pela inteligência/histórico. Filas, banco, sessão, mídia e caches são locais e ignorados pelo Git.
+
+## Testes
+
+GitHub Actions executa `python -m unittest discover -p 'test_*.py' -v` sem credenciais reais. Integrações externas devem falhar de forma fechada: ausência de autenticação ou resolução confiável impede publicação.
