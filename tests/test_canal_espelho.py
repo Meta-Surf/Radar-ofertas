@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import canal_espelho as mirror
 from shopee_afiliados import AffiliateError
+import bot_ofertas_revisao as publisher
+from unittest.mock import Mock, patch
 
 
 def message(text, *, buttons=None):
@@ -71,6 +73,28 @@ class CanalEspelhoTests(unittest.TestCase):
                 mirror.PLACEHOLDER + "\nhttps://instagram.com/canal",
                 "https://meli.la/MINHAOFERTA",
             )
+
+
+    def test_publicador_espelho_nao_reescreve_nem_exige_preco_parseado(self):
+        affiliate = "https://s.shopee.com.br/meulink"
+        offer = {
+            "kind": "product_offer",
+            "store": "Shopee",
+            "publish_mode": "mirror",
+            "affiliate_generated": True,
+            "affiliate_url": affiliate,
+            "mirror_template": "🔥 Oferta muito bem formatada\n\n👉 Link: " + mirror.PLACEHOLDER,
+            "mirror_button_text": None,
+        }
+        response = Mock()
+        response.json.return_value = {"ok": True, "result": {"message_id": 321}}
+        with patch.object(publisher.requests, "post", return_value=response) as post:
+            message_id, wait = publisher.send("token", "@destino", offer, None)
+        self.assertEqual((message_id, wait), (321, 0))
+        data = post.call_args.kwargs["data"]
+        self.assertIn(affiliate, data["text"])
+        self.assertNotIn(mirror.PLACEHOLDER, data["text"])
+        self.assertNotIn("reply_markup", data)
 
 
 if __name__ == "__main__":
