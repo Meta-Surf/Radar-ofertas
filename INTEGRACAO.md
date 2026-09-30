@@ -105,3 +105,39 @@ O monitor mostra `Monitorando ... chats` e `Oferta captada`. O radar mostra `Fil
 
 Testes locais: `py -m unittest discover -p "test_*.py" -v`. Os testes usam dados simulados; login, acesso real aos grupos e APIs precisam ser conferidos no computador de execução.
 
+
+
+## Canal especial em modo espelho
+
+Use `TG_ESPELHO_CHATS` para canais cujas ofertas devem manter o texto e a
+formatação originais. Os canais configurados nessa variável são incluídos
+automaticamente no monitor, mesmo que não estejam repetidos em `TG_CHATS`.
+
+Exemplo:
+
+```env
+TG_ESPELHO_CHATS=@JoaoVluitzPromocoes
+```
+
+Nesse modo, ofertas comuns preservam título, emojis, quebras de linha,
+formatação, preço, parcelas, observações e a imagem captada da origem. O Radar
+remove links de redes sociais, grupos, redirecionadores de terceiros e páginas
+informativas. A publicação só prossegue quando há um único link de produto de
+uma loja com geração de afiliado implementada; atualmente Shopee e Mercado
+Livre. O link original da loja é substituído pelo link de afiliado gerado pelas
+credenciais locais. Se a conversão não puder ser confirmada, a publicação é
+bloqueada, sem fallback para o link do canal de origem.
+
+Mensagens reconhecidas como cupons não usam o modo espelho. Cupons Shopee e
+Mercado Livre continuam entrando no fluxo atual, com banner próprio e o padrão
+do Radar. O modo espelho também reutiliza automaticamente a foto da publicação
+quando ela estiver disponível e o canal não tiver proteção contra encaminhamento.
+
+Para confirmar que a conta do Telegram enxerga o canal, pare temporariamente o
+monitor e execute `py monitor_ofertas.py --listar`. O diagnóstico de uma
+publicação mostra também `Modo espelho: True` quando a origem estiver
+configurada corretamente.
+
+> Esta implementação não altera o intervalo do radar contínuo. A mudança de
+> 10 para 20 minutos deve ser aplicada separadamente depois de validar o canal
+> espelho.
