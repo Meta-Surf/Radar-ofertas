@@ -1,3 +1,5 @@
+> O comportamento de segurança descrito continua válido. Os exemplos e passos de pacote são históricos; para operação atual use [docs/operacao.md](docs/operacao.md).
+
 # Links de produtos via desconto.games
 
 O monitor agora aceita desconto.games para produtos, além do suporte anterior
