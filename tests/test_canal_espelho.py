@@ -132,5 +132,38 @@ class CanalEspelhoTests(unittest.TestCase):
         )
 
 
+    def test_shopee_vip_e_descartado_e_produto_permanece(self):
+        product_url = "https://s.shopee.com.br/1BMiv3rxzA"
+        vip_url = "https://s.shopee.com.br/5foq7KHI00"
+        msg = message(
+            "🔥🙏 Placa de Vídeo MSI GeForce RTX 5050 GAMING OC 8G 912-V538-009\n\n"
+            "✅ R$ 2.023,00 À vista (consulte como fica parcelado)\n\n"
+            f"👉 Link: {product_url}\n\n"
+            "🚨 Oferta e/ou cupom por tempo limitado, aproveite! 🙏\n\n"
+            f"🎁 Assine o Shopee VIP (Teste grátis) e tenha frete grátis e cupons exclusivos: {vip_url}\n\n"
+            "(anúncio)"
+        )
+        product = ("Shopee:344381236:45465789471", "Shopee",
+                   "https://shopee.com.br/product/344381236/45465789471")
+        with patch.object(
+            monitor, "resolve_for_capture",
+            side_effect=[(product, ""), (None, "Página sem produto identificável.")]
+        ):
+            candidates, ignored = __import__("asyncio").run(
+                monitor.mirror_product_candidates([msg], set())
+            )
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["source_url"], product_url)
+        self.assertEqual(len(ignored), 1)
+        self.assertEqual(ignored[0][0], vip_url)
+
+        template, _ = mirror.build_template([msg], [product_url])
+        self.assertIn("Placa de Vídeo MSI GeForce RTX 5050", template)
+        self.assertIn("R$ 2.023,00", template)
+        self.assertIn(mirror.PLACEHOLDER, template)
+        self.assertNotIn("Shopee VIP", template)
+        self.assertNotIn(vip_url, template)
+
+
 if __name__ == "__main__":
     unittest.main()
