@@ -75,6 +75,27 @@ def matching_button_text(messages, source_urls):
     return labels[0] if len(labels) == 1 else None
 
 
+def _drop_unwanted_link_lines(value, all_links, wanted):
+    """Remove a linha promocional quando ela aponta só para destino não utilizado."""
+    unwanted = [url for url in all_links if url not in wanted]
+    if not unwanted:
+        return value
+    output = []
+    for line in value.splitlines():
+        has_unwanted = any(
+            url in line or html.escape(url, quote=True) in line
+            for url in unwanted
+        )
+        has_wanted = any(
+            url in line or html.escape(url, quote=True) in line
+            for url in wanted
+        )
+        if has_unwanted and not has_wanted:
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
 def _clean_lines(value):
     output = []
     previous_blank = False
@@ -102,6 +123,7 @@ def build_template(messages, source_urls):
     all_links = extract_all_links(messages)
     wanted = set(source_urls)
     value = "\n".join(message_html(m) for m in messages if (m.raw_text or "").strip())
+    value = _drop_unwanted_link_lines(value, all_links, wanted)
 
     def rewrite_anchor(match):
         href = html.unescape(match.group(1))
