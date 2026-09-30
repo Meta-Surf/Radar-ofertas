@@ -355,7 +355,7 @@ async def main():
                        'source_date': messages[0].date.isoformat(),
                        'capture_digest': digest, 'recovered': recovered}
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                    out.write(json.dumps(row, ensure_ascii=False) + '\\n')
+                    out.write(json.dumps(row, ensure_ascii=False) + '\n')
                 print('Oferta espelho captada:', key, '| loja:', store, '| imagem:', bool(image))
                 return
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
