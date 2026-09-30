@@ -14,6 +14,7 @@ from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
 import mercadolivre_manual as ml_manual
+import canal_espelho as mirror
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -69,7 +70,8 @@ def photo_path(offer):
     return path if 0 < path.stat().st_size <= 10_000_000 else None
 
 def send(token, channel, offer, image):
-    if not valid_price(offer):
+    is_mirror = offer.get('publish_mode') == 'mirror'
+    if not is_mirror and not valid_price(offer):
         raise AffiliateError('Publicação bloqueada: preço ausente ou inválido.')
     if offer.get('kind') == 'ml_manual_offer':
         offer = ml_manual.prepare(offer)
@@ -80,12 +82,24 @@ def send(token, channel, offer, image):
             raise AffiliateError('Publicação bloqueada: link de afiliado Mercado Livre inválido.')
     elif not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
-    if len(caption(offer).encode('utf-16-le')) // 2 > 1024:
+
+    rendered = (mirror.render(offer.get('mirror_template'), offer.get('affiliate_url'))
+                if is_mirror else caption(offer))
+    if mirror.visible_length(rendered) > 1024:
         image = None
     method = 'sendPhoto' if image else 'sendMessage'
-    data = {'chat_id': channel, 'parse_mode': 'HTML',
-            'reply_markup': json.dumps({'inline_keyboard': [[{'text': '🛒 VER OFERTA', 'url': offer['affiliate_url']}]]})}
-    data['caption' if image else 'text'] = caption(offer)
+    data = {'chat_id': channel, 'parse_mode': 'HTML'}
+    if is_mirror:
+        button = str(offer.get('mirror_button_text') or '').strip()
+        if button:
+            data['reply_markup'] = json.dumps({
+                'inline_keyboard': [[{'text': button[:64], 'url': offer['affiliate_url']}]]
+            })
+    else:
+        data['reply_markup'] = json.dumps({
+            'inline_keyboard': [[{'text': '🛒 VER OFERTA', 'url': offer['affiliate_url']}]]
+        })
+    data['caption' if image else 'text'] = rendered
     endpoint = f'https://api.telegram.org/bot{token}/{method}'
     if isinstance(image, str):
         data['photo'] = image
@@ -96,7 +110,6 @@ def send(token, channel, offer, image):
     else:
         data['link_preview_options'] = json.dumps({'is_disabled': True})
         response = requests.post(endpoint, data=data, timeout=(10, 45))
-    # Somente ok:false é uma rejeição inequívoca. HTTP/JSON inesperado é incerto.
     result = response.json()
     if result.get('ok') is False:
         return None, int(result.get('parameters', {}).get('retry_after', 60))
@@ -161,6 +174,7 @@ def run_publisher(args, parser):
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
                 is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
+                is_mirror = offer.get('publish_mode') == 'mirror'
                 is_recovered = bool(offer.get('recovered')) and offer.get('source') != 'shopee_api'
                 if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
                     marker = ('ml_afiliado_indisponivel', key)
@@ -204,8 +218,9 @@ def run_publisher(args, parser):
                         continue
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         continue
-                    needs_public_data = (is_ml_pending or not offer.get('name') or not valid_price(offer)
-                                         or (require_photo and not (offer.get('api_image') or photo_path(offer))))
+                    needs_public_data = (is_ml_pending or (not is_mirror and (
+                                         not offer.get('name') or not valid_price(offer)
+                                         or (require_photo and not (offer.get('api_image') or photo_path(offer))))))
                     if needs_public_data:
                         try:
                             ready = auto_reader.read(offer, blocking=args.simular)
@@ -236,7 +251,7 @@ def run_publisher(args, parser):
                             print('Leitura automática ML pendente:', key, '|', str(error))
                             retry_at[key] = time.monotonic() + 300
                             continue
-                if not is_coupon and not valid_price(offer):
+                if not is_coupon and not is_mirror and not valid_price(offer):
                     marker = ('sem_preco', key)
                     if marker not in announced:
                         print('Aguardando preço explícito ou edição na origem:', key)
@@ -280,7 +295,7 @@ def run_publisher(args, parser):
                             offer = ml_affiliate.prepare(offer)
                         else:
                             offer = affiliate.prepare(offer)
-                        if not valid_price(offer):
+                        if not is_mirror and not valid_price(offer):
                             raise AffiliateError('Publicação bloqueada: preço ausente ou inválido após preparação.')
                     if theme:
                         offer['tema_radar'] = theme
@@ -295,12 +310,14 @@ def run_publisher(args, parser):
                         intelligence.discard(key)
                     retry_at[key] = time.monotonic() + 300
                     continue
-                if not is_coupon:
+                if not is_coupon and not is_mirror:
                     offer['history_badge'] = intelligence.badge(offer, channel)
                 day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
                 if not args.simular and not day:
                     continue
-                image = (ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon else (offer.get('api_image') or photo_path(offer))
+                image = ((ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon
+                         else ((photo_path(offer) or offer.get('api_image')) if is_mirror
+                               else (offer.get('api_image') or photo_path(offer))))
                 if require_photo and not image and not is_coupon:
                     if key not in announced:
                         print('Aguardando imagem autorizada:', key)
@@ -311,7 +328,9 @@ def run_publisher(args, parser):
                     continue
                 if args.simular:
                     if key not in announced:
-                        preview = (ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon else caption(offer)
+                        preview = ((ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon
+                                   else (mirror.render(offer.get('mirror_template'), offer.get('affiliate_url'))
+                                         if is_mirror else caption(offer)))
                         links = [] if is_ml_coupon else ([e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']])
                         print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                         announced.add(key)
