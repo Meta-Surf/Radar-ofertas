@@ -137,6 +137,38 @@ async def resolve_for_capture(url):
     return None, reason
 
 
+async def mirror_product_candidates(messages, excluded=None):
+    """Resolve links do canal espelho e conserva somente produtos reais."""
+    excluded = set(excluded or ())
+    urls = list(dict.fromkeys(
+        u for message in messages for u in extract_links(message)
+        if u not in excluded and mirror.supported_store_url(u)
+    ))
+    found, ignored = [], []
+    for url in urls:
+        resolved, reason = await resolve_for_capture(url)
+        if resolved and resolved[1] in ('Shopee', 'Mercado Livre'):
+            key, store, direct_url = resolved
+            found.append({
+                'source_url': url,
+                'key': key,
+                'store': store,
+                'direct_url': direct_url,
+                'kind': 'ml_offer' if store == 'Mercado Livre' else 'product_offer',
+            })
+        elif ml_manual.allowed_link(url):
+            found.append({
+                'source_url': url,
+                'key': ml_manual.pending_key(url),
+                'store': 'Mercado Livre',
+                'direct_url': url,
+                'kind': 'ml_offer_pending',
+            })
+        else:
+            ignored.append((url, reason or 'Página da loja sem produto identificável.'))
+    return found, ignored
+
+
 async def edited_messages(client, event):
     """Reúne o álbum da edição sem misturar legendas de outros produtos."""
     message = event.message
@@ -258,7 +290,12 @@ async def main():
                     print('Analisando link', i)
                     try:
                         p = await asyncio.to_thread(resolve, url, print)
-                        print('Produto:', p[0] if p else 'não identificado')
+                        if p:
+                            print('Produto:', p[0])
+                        elif dialog.id in mirror_chat_ids and mirror.supported_store_url(url):
+                            print('Página sem produto: será removida da publicação no modo espelho.')
+                        else:
+                            print('Produto: não identificado')
                     except Exception as e:
                         print('Falha de rede ou formato:', type(e).__name__)
             print('Diagnóstico encerrado. Nada foi publicado ou colocado na fila.')
@@ -316,40 +353,25 @@ async def main():
             # gera uma segunda publicação. O texto/código permanece na oferta.
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
             if chat_id in mirror_chat_ids:
-                source_urls = list(dict.fromkeys(
-                    u for m in messages for u in extract_links(m)
-                    if u not in excluded and mirror.supported_store_url(u)
-                ))
-                # Proteção contra falso positivo do detector de cupom: se a
-                # mensagem tem preço de produto e apenas um link de loja, ele
-                # continua sendo tratado como oferta, não como alerta de cupom.
-                if not source_urls and price_info(text):
-                    fallback = list(dict.fromkeys(
-                        u for m in messages for u in extract_links(m)
-                        if mirror.supported_store_url(u)
-                    ))
-                    if len(fallback) == 1:
-                        source_urls = fallback
-                if len(source_urls) != 1:
-                    if source_urls:
-                        print('Canal espelho ignorado: publicação contém mais de um link de loja.', chat_id, messages[0].id)
+                candidates, ignored_links = await mirror_product_candidates(messages, excluded)
+                # Em oferta com preço, um link pode ter sido classificado como
+                # "cupom" pelo texto promocional; reavalia todos os links da loja.
+                if not candidates and price_info(text):
+                    candidates, ignored_links = await mirror_product_candidates(messages, set())
+                for ignored_url, ignored_reason in ignored_links:
+                    print('Canal espelho descartou página sem produto:', ignored_url, '|', ignored_reason)
+                if len(candidates) != 1:
+                    if candidates:
+                        print('Canal espelho ignorado: publicação contém mais de um produto de loja.', chat_id, messages[0].id)
                     else:
-                        print('Canal espelho ignorado: nenhum link de produto de loja suportada.', chat_id, messages[0].id)
+                        print('Canal espelho ignorado: nenhum link de produto de loja identificado.', chat_id, messages[0].id)
                     return
-                source_url = source_urls[0]
-                resolved, reason = await resolve_for_capture(source_url)
-                if resolved:
-                    key, store, direct_url = resolved
-                    kind = 'ml_offer' if store == 'Mercado Livre' else 'product_offer'
-                elif ml_manual.allowed_link(source_url):
-                    key, store, direct_url = ml_manual.pending_key(source_url), 'Mercado Livre', source_url
-                    kind = 'ml_offer_pending'
-                else:
-                    print('Canal espelho ignorado: link da loja não pôde ser resolvido.', chat_id, messages[0].id, '|', reason)
-                    return
-                if store not in ('Shopee', 'Mercado Livre'):
-                    print('Canal espelho aguardando integração de afiliados da loja:', store)
-                    return
+                candidate = candidates[0]
+                source_url = candidate['source_url']
+                key, store, direct_url, kind = (
+                    candidate['key'], candidate['store'],
+                    candidate['direct_url'], candidate['kind']
+                )
                 try:
                     mirror_template, mirror_button = mirror.build_template(messages, [source_url])
                 except AffiliateError as error:
