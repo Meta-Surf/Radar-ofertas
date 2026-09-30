@@ -13,7 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
-from ofertas_core import extract_links, resolve, price, price_info, coupon, coupon_page_links, safe_url
+from ofertas_core import extract_links, resolve, product, price, price_info, coupon, coupon_page_links, safe_url
 from cupons_shopee import build_alerts, coupon_entries
 from cupons_mercadolivre import build_alert as build_ml_alert
 import mercadolivre_manual as ml_manual
@@ -55,6 +55,22 @@ def bounded_env_int(name, default, minimum, maximum):
     except (TypeError, ValueError):
         value = default
     return max(minimum, min(maximum, value))
+
+
+def exclusive_coupon_message(text, messages, shopee_alerts=None, ml_alert=None):
+    """Só cria publicação própria de cupom quando a mensagem é dedicada a cupons.
+
+    Oferta de produto com preço/código de cupom continua sendo uma única oferta.
+    """
+    if not (shopee_alerts or ml_alert):
+        return False
+    if price_info(text):
+        return False
+    for message in messages:
+        for url in extract_links(message):
+            if product(url):
+                return False
+    return True
 
 
 def queued_revision_digests(path):
@@ -259,12 +275,22 @@ async def main():
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
             ml_alert = ml_manual.build_coupon(messages, chat_id)
-            if ml_alert:
-                ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered)
-                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                    out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
-                print('Lista de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
-                return
+            alerts = build_alerts(messages, chat_id)
+            coupon_only = exclusive_coupon_message(text, messages, alerts, ml_alert)
+            if coupon_only:
+                if ml_alert:
+                    ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered)
+                    with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                        out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
+                    print('Lista exclusiva de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
+                    return
+                if alerts:
+                    with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                        for alert in alerts:
+                            alert = dict(alert, capture_digest=digest, recovered=recovered)
+                            out.write(json.dumps(alert, ensure_ascii=False) + '\n')
+                    print('Mensagem exclusiva de cupons Shopee captada:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
+                    return
             if ml_manual.trusted(chat_id):
                 try:
                     row = ml_manual.build_offer(messages, chat_id)
@@ -286,22 +312,24 @@ async def main():
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
                 print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
                 return
-            alerts = build_alerts(messages, chat_id)
-            if alerts:
-                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                    for alert in alerts:
-                        alert = dict(alert, capture_digest=digest, recovered=recovered)
-                        out.write(json.dumps(alert, ensure_ascii=False) + '\n')
-                print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
+            # Se havia código/link de cupom junto de uma oferta de produto, ele não
+            # gera uma segunda publicação. O texto/código permanece na oferta.
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
-            if alerts and chat_id in mirror_chat_ids:
-                # Cupons do canal especial continuam usando a arte e o padrão próprios.
-                return
             if chat_id in mirror_chat_ids:
                 source_urls = list(dict.fromkeys(
                     u for m in messages for u in extract_links(m)
                     if u not in excluded and mirror.supported_store_url(u)
                 ))
+                # Proteção contra falso positivo do detector de cupom: se a
+                # mensagem tem preço de produto e apenas um link de loja, ele
+                # continua sendo tratado como oferta, não como alerta de cupom.
+                if not source_urls and price_info(text):
+                    fallback = list(dict.fromkeys(
+                        u for m in messages for u in extract_links(m)
+                        if mirror.supported_store_url(u)
+                    ))
+                    if len(fallback) == 1:
+                        source_urls = fallback
                 if len(source_urls) != 1:
                     if source_urls:
                         print('Canal espelho ignorado: publicação contém mais de um link de loja.', chat_id, messages[0].id)
