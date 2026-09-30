@@ -18,6 +18,7 @@ from cupons_shopee import build_alerts, coupon_entries
 from cupons_mercadolivre import build_alert as build_ml_alert
 import mercadolivre_manual as ml_manual
 from shopee_afiliados import AffiliateError
+import canal_espelho as mirror
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -148,6 +149,10 @@ async def main():
                 print(d.id, d.name)
             return
         requested = [x.strip() for x in os.getenv('TG_CHATS', '').split(',') if x.strip()]
+        mirror_requested = mirror.configured_chats()
+        for value in mirror_requested:
+            if value not in requested:
+                requested.append(value)
         if ml_manual.chat_id() and ml_manual.chat_id() not in requested:
             if any(str(d.id) == ml_manual.chat_id() for d in dialogs):
                 requested.append(ml_manual.chat_id())
@@ -157,6 +162,7 @@ async def main():
             parser.error('Preencha TG_CHATS com IDs negativos ou @nomes da lista.')
         selected = []
         selected_dialogs = {}
+        mirror_chat_ids = set()
         missing = []
         for value in requested:
             match = next((d for d in dialogs if str(d.id) == value or
@@ -169,9 +175,12 @@ async def main():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
             selected_dialogs[match.id] = match
+            if value in mirror_requested:
+                mirror_chat_ids.add(match.id)
         if not selected:
             parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
         allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
+        allowed_media.update(str(chat_id) for chat_id in mirror_chat_ids)
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
 
@@ -192,6 +201,7 @@ async def main():
             print('Canal:', dialog.name, '| ID:', dialog.id)
             print('Está em TG_CHATS:', dialog.id in selected)
             print('Imagens autorizadas em TG_MEDIA_CHATS:', str(dialog.id) in allowed_media)
+            print('Modo espelho:', dialog.id in mirror_chat_ids)
             message = await client.get_messages(dialog.entity, ids=int(match[2]))
             if not message:
                 print('Mensagem não encontrada ou indisponível para sua conta.')
@@ -284,6 +294,70 @@ async def main():
                         out.write(json.dumps(alert, ensure_ascii=False) + '\n')
                 print('Alerta de cupons captado:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
             excluded = coupon_page_links(text) | {e['url'] for a in alerts for e in a['entries']}
+            if alerts and chat_id in mirror_chat_ids:
+                # Cupons do canal especial continuam usando a arte e o padrão próprios.
+                return
+            if chat_id in mirror_chat_ids:
+                source_urls = list(dict.fromkeys(
+                    u for m in messages for u in extract_links(m)
+                    if u not in excluded and mirror.supported_store_url(u)
+                ))
+                if len(source_urls) != 1:
+                    if source_urls:
+                        print('Canal espelho ignorado: publicação contém mais de um link de loja.', chat_id, messages[0].id)
+                    else:
+                        print('Canal espelho ignorado: nenhum link de produto de loja suportada.', chat_id, messages[0].id)
+                    return
+                source_url = source_urls[0]
+                resolved, reason = await resolve_for_capture(source_url)
+                if resolved:
+                    key, store, direct_url = resolved
+                    kind = 'ml_offer' if store == 'Mercado Livre' else 'product_offer'
+                elif ml_manual.allowed_link(source_url):
+                    key, store, direct_url = ml_manual.pending_key(source_url), 'Mercado Livre', source_url
+                    kind = 'ml_offer_pending'
+                else:
+                    print('Canal espelho ignorado: link da loja não pôde ser resolvido.', chat_id, messages[0].id, '|', reason)
+                    return
+                if store not in ('Shopee', 'Mercado Livre'):
+                    print('Canal espelho aguardando integração de afiliados da loja:', store)
+                    return
+                try:
+                    mirror_template, mirror_button = mirror.build_template(messages, [source_url])
+                except AffiliateError as error:
+                    print(str(error), '| mensagem', messages[0].id)
+                    return
+                image = None
+                photo = next((m for m in messages if m.photo), None)
+                if photo:
+                    try:
+                        target = media_dir / f'{chat_id}_{photo.id}.jpg'
+                        downloaded = await client.download_media(photo, file=str(target))
+                        if downloaded and target.exists() and 0 < target.stat().st_size <= 10_000_000:
+                            image = str(target.relative_to(BASE))
+                        elif target.exists():
+                            target.unlink()
+                    except Exception:
+                        logging.warning('Imagem espelho indisponível na mensagem %s.', photo.id)
+                captured_price = price_info(text) or {}
+                title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
+                title = next((line for line in title_lines if line and not re.search(r'https?://|R\\$|[💵💰💸]', line)), '')
+                row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
+                       'kind': kind, 'publish_mode': 'mirror',
+                       'mirror_template': mirror_template, 'mirror_button_text': mirror_button,
+                       'mirror_source_url': source_url,
+                       'name': title[:160], 'price': captured_price.get('price'),
+                       'price_condition': captured_price.get('price_condition', ''),
+                       'price_from': captured_price.get('price_from', False),
+                       'coupon': coupon(text), 'image': image,
+                       'chat_id': chat_id, 'message_id': min(m.id for m in messages),
+                       'captured_at': datetime.now(timezone.utc).isoformat(),
+                       'source_date': messages[0].date.isoformat(),
+                       'capture_digest': digest, 'recovered': recovered}
+                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
+                    out.write(json.dumps(row, ensure_ascii=False) + '\\n')
+                print('Oferta espelho captada:', key, '| loja:', store, '| imagem:', bool(image))
+                return
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
             products = {}
             pending_ml = {}
