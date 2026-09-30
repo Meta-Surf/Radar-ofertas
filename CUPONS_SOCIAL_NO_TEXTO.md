@@ -1,3 +1,5 @@
+> Recurso ainda válido. Os passos de pacote abaixo registram a entrega de 28/09/2026; para operação atual use [docs/operacao.md](docs/operacao.md).
+
 # Social no texto dos cupons — 28/09/2026
 
 Os alertas de cupons Mercado Livre terminam com:
