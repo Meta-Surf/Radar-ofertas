@@ -38,7 +38,7 @@ class IntegrationTests(unittest.TestCase):
                         publisher.run_publisher(SimpleNamespace(simular=False), Mock())
                     self.assertEqual([call.args[2]['product_id'] for call in send.call_args_list],
                                      ['Shopee:1:1', 'Shopee:1:3', 'Shopee:1:2'])
-                    self.assertEqual(ledger.publication_delay(clock_id=2), 600)
+                    self.assertEqual(ledger.publication_delay(clock_id=2), 1200)
             finally:
                 ledger.db.close()
 
