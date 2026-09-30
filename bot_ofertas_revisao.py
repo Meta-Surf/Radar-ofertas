@@ -36,7 +36,7 @@ def rows():
 def ordered_rows(intelligence=None, channel=""):
     # Prioridade: grupos ao vivo > recuperadas > radar.
     # A pausa das recuperadas é aplicada no publicador; durante essa pausa o radar
-    # continua podendo usar sua própria janela de 10 minutos.
+    # continua podendo usar sua própria janela de 20 minutos.
     live_groups, recovered_groups, radar, latest = [], [], [], {}
     for offer in rows():
         if offer.get('source') == 'shopee_api':
@@ -147,7 +147,7 @@ def run_publisher(args, parser):
         ml_affiliate = None
         print("Afiliados Mercado Livre indisponível:", str(e), "| links automáticos ML ficarão bloqueados.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
-    interval = 600  # Intervalo exclusivo das publicações originadas no radar.
+    interval = 1200  # Intervalo exclusivo das publicações originadas no radar.
     recovery_interval = max(5, int(os.getenv('INTERVALO_RECUPERADAS', '30')))
     recovery_max_age = max(1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45')))
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
