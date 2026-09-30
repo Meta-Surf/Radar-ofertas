@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO.** Registra uma correção incremental de 28/09/2026. Para operação atual, use [docs/operacao.md](docs/operacao.md) e [INTEGRACAO.md](INTEGRACAO.md).
+
 # Correção de classificação de cupom — 28/09/2026
 
 O log da oferta AOC mostra dois bloqueios independentes:

@@ -1,4 +1,6 @@
-# Cupons Mercado Livre — 28/09/2026
+# Cupons Mercado Livre
+
+> Recurso atual. Para instalação e operação use [docs/operacao.md](docs/operacao.md); os passos de pacote abaixo são históricos.
 
 Arte original Radar de Ofertas e captura de listas completas com códigos,
 percentuais, compra mínima e limite. Formatação semelhante às mensagens de origem;
@@ -23,8 +25,8 @@ anteriores de 28/09/2026 (main 426bba6 ou posterior antes desta atualização).
 
 Nenhuma mudança de .env é necessária. Cupons ML não dependem da API Shopee.
 A arte está em assets/banner_cupons_ml.png. Também pode ser enviada manualmente.
-As listas novas dos grupos em TG_CHATS serão captadas. Publicações antigas não são
-reprocessadas automaticamente. As duas mensagens de exemplo são usadas em testes,
+As listas novas dos grupos em TG_CHATS serão captadas. Ao reiniciar, o monitor também pode
+reprocessar mensagens recentes dentro da janela de recuperação configurada; o histórico completo do grupo não é varrido. As duas mensagens de exemplo são usadas em testes,
 não adicionadas à sua fila real.
 
 Validação local: testes automatizados de listas, links, limites de legenda,

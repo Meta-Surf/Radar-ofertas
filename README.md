@@ -1,117 +1,126 @@
-> Atualização de 27/09/2026: o fluxo atual usa **INICIAR_INTEGRADO.bat**, com grupos/cupons prioritários, radar a cada 600 segundos, 24 temas, marcas preferenciais e fila SQLite de duas horas. Preços divulgados passam a ser registrados após envio confirmado. Os selos de 30/60/90/180 dias exigem variante confirmada, ainda não fornecida pelas fontes atuais. Veja [ATUALIZACAO_RADAR.md](ATUALIZACAO_RADAR.md) para instalação e limites. Orientações históricas divergentes abaixo não descrevem o fluxo integrado atual.
-
 # Radar de Ofertas
 
-Monitor de ofertas do Telegram e publicador de links de afiliado da Shopee. Inclui os experimentos do radar de preços e autenticação do Mercado Livre.
+Automação em Python para monitorar ofertas e cupons, gerar links próprios de afiliado e publicar no Telegram com controle de prioridade, deduplicação e recuperação após reinício.
 
-## Estado do projeto
+## Estado atual — 30/09/2026
 
-| Componente | Situação |
+| Componente | Estado |
 |---|---|
-| Monitor de grupos/canais do Telegram | Implementado; utiliza a conta do usuário e chats configurados |
-| Geração de links Shopee | API integrada; geração real de link confirmada pelo usuário |
-| Publicador Shopee | Implementado; bloqueia envio sem link de afiliado gerado |
-| Imagens, cupons e duplicatas | Implementados com as limitações descritas em [docs/operacao.md](docs/operacao.md) |
-| Mercado Livre | OAuth e versões de radar incluídos; consultas a alguns itens apresentaram HTTP 403 |
-| Afiliados Mercado Livre | Integração experimental pronta: gera short_url pela sessão autenticada do Link Builder; exige teste real local antes de habilitar |
-| Amazon, Instagram e WhatsApp | Integrações de publicação/afiliados pendentes |
+| Monitor Telegram | Ativo; monitora grupos/canais configurados, mensagens novas, edições e recuperação de mensagens recentes |
+| Canal especial em modo espelho | Ativo; preserva texto/formatação/imagem, remove links informativos e troca apenas o link do produto pelo afiliado |
+| Shopee | API de afiliados integrada; radar contínuo com 43 temas |
+| Intervalo do Radar Shopee | 1 publicação do radar a cada 1200 s (20 min); grupos/canais e cupons não aguardam esse relógio |
+| Cupons Shopee | Ativo; mensagens exclusivas de cupons usam arte e padrão próprios |
+| Mercado Livre | Ofertas de grupos monitorados e entrada manual integradas; geração automática de afiliado usa sessão do Link Builder |
+| Cupons Mercado Livre | Ativo; listas exclusivas usam arte própria e o Social configurado |
+| KaBuM | Integração Awin em modo diagnóstico; Product Feed, cache e histórico de preços validados localmente; ainda não publica no Telegram |
+| Amazon | Pendente |
+| Instagram e WhatsApp | Publicação multicanal pendente |
 
-Este repositório preserva o código recebido em 25/09/2026. As versões anteriores do radar ficam em `archive/mercadolivre/`. A versão atual, `radar_mercadolivre_v6.py`, permanece na raiz. Elas não representam commits históricos: o histórico do Git começa na importação.
+O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
 
-## Organização
+## Prioridade de publicação
 
-| Pasta/arquivo | Finalidade |
-|---|---|
-| Scripts Python na raiz | Monitor, publicador e integrações atuais |
-| `tests/` | Testes locais com serviços simulados |
-| `docs/` | Operação e arquitetura |
-| `examples/` | Modelos de arquivos locais do Mercado Livre |
-| `assets/` | Identidade visual |
-| `archive/mercadolivre/` | Versões anteriores para consulta |
-| `.github/workflows/` | Validação automática em cada atualização |
+1. ofertas novas captadas nos grupos/canais;
+2. ofertas recuperadas após reinício;
+3. Radar Shopee.
 
-Veja também [arquitetura](docs/arquitetura.md) e [como contribuir](CONTRIBUTING.md).
+As ofertas captadas não aguardam os 20 minutos do radar. Mensagens de produto que contêm um código de cupom continuam sendo uma única publicação; somente mensagens dedicadas exclusivamente a cupons entram no fluxo visual próprio.
 
-## Configuração no Windows
+## Canal especial
 
-Recomendado: Python 3.11 ou superior. O projeto foi utilizado pelo usuário no Python 3.14.
+O modo espelho é ativado por `TG_ESPELHO_CHATS`. A configuração validada em produção usa a ID numérica do Telegram:
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
+```env
+TG_ESPELHO_CHATS=-1003781163851
 ```
 
-Se já possui `.env`, preserve-o e não execute o comando de cópia sobre ele. Preencha as credenciais no arquivo local. O `.env.example` contém apenas nomes e padrões sem segredos. Para compatibilidade com as instruções anteriores, também existe `.env.exemplo`.
+Nesse modo, links de redes sociais, páginas informativas e promoções auxiliares sem produto são descartados. Exemplo já tratado: uma oferta Shopee com um segundo link para `/m/shopeevip` mantém somente o link que resolve para o produto.
 
-## Radar direto Shopee
+## Execução integrada
 
-Busca ofertas pela API sem depender dos grupos. Comece com `py radar_shopee.py --buscar "fone bluetooth"` (prévia sem publicação). Veja [filtros, simulação e execução automática](docs/radar-shopee.md). Para o radar contínuo de 22 temas com publicação de até uma oferta a cada cinco minutos, execute `py radar_shopee_continuo.py --publicar --loop --intervalo 300 --limite 1`. Preserve `.env` e `publicacoes.sqlite3` ao atualizar o projeto. A consulta de campanhas não valida códigos de cupom.
-
-## Shopee + Telegram
-
-Teste a geração de um link com uma URL real de produto:
+Instale as dependências:
 
 ```powershell
-.\.venv\Scripts\python.exe shopee_afiliados.py --testar "URL_DO_PRODUTO_SHOPEE"
+py -m pip install -r requirements.txt
 ```
 
-Rode o monitor em uma janela:
+Inicie:
 
 ```powershell
-.\.venv\Scripts\python.exe monitor_ofertas.py
+INICIAR_INTEGRADO.bat
 ```
 
-Em outra janela na mesma pasta, simule as ofertas elegíveis:
+Equivalente manual:
 
 ```powershell
-.\.venv\Scripts\python.exe bot_ofertas_revisao.py --simular
+py -u monitor_ofertas.py
+py -u radar_shopee_continuo.py --enfileirar --loop --intervalo 1200 --limite 3
+py -u bot_ofertas_revisao.py
 ```
 
-Para publicar automaticamente, execute sem `--simular`. A simulação consulta a API de Afiliados, mas não envia mensagens ao Telegram. O monitor captura mensagens novas; o diagnóstico não coloca mensagens antigas na fila. Consulte [o guia de operação](docs/operacao.md) para fotos, cupons, resolução de links, horário de Brasília e limites do controle de duplicatas.
+Não execute outra instância do mesmo monitor, radar ou publicador em paralelo.
+
+## Configuração
+
+Copie `.env.example` para `.env` apenas em uma instalação nova. Em instalações existentes, preserve o `.env` atual.
+
+Principais grupos de configuração:
+
+- Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_ESPELHO_CHATS`;
+- Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
+- Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;
+- KaBuM/Awin: `KABUM_AWIN_FEED_URL` e opções de seleção/cache descritas em [KABUM_AWIN.md](KABUM_AWIN.md).
+
+## Shopee
+
+O radar contínuo lê `radar_categorias.json`, atualmente com 43 temas em 6 grupos. Os filtros mínimos, regras de título, marcas prioritárias, fila persistente e histórico estão documentados em [docs/radar-shopee.md](docs/radar-shopee.md).
+
+O publicador gera um novo link com as credenciais do projeto; falha de conversão bloqueia a publicação. Não há fallback para link de afiliado de terceiros.
 
 ## Mercado Livre
 
-- `mercadolivre_auth.py`: fluxo OAuth com callback local. Usa Flask; exibe tokens no terminal após autorização. Não compartilhe a saída. É um utilitário de desenvolvimento, não um servidor de produção.
-- `teste_mercadolivre.py`: consulta real à conta configurada. Não faz parte dos testes automatizados e sua saída pode conter dados pessoais.
-- `radar_mercadolivre_v6.py`: monitor de anúncios/IDs configurados. Comece com `--probe ID_DO_ANUNCIO` ou `--dry-run`; mantenha `ML_MODO_TESTE=1` durante os testes.
-- Copie `examples/ml_itens.example.txt` para `ml_itens.txt` e `examples/ml_links_afiliados.example.json` para `ml_links_afiliados.json` para preencher seus dados localmente.
+Há três fluxos distintos:
 
-A autenticação OAuth continua separada da geração de afiliados. O fluxo integrado novo está em `mercadolivre_afiliados.py`: usa Cookie/X-CSRF-Token do Link Builder, bloqueia em caso de falha e nunca cai para link comum ou de terceiro. Veja [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md) antes do primeiro teste real.
+- ofertas de canais monitorados: o produto é identificado e o publicador tenta gerar um novo link de afiliado;
+- grupo manual: preserva o link que o operador já inseriu como seu próprio link;
+- listas exclusivas de cupons: usam a arte própria e o texto padrão do projeto.
+
+Consulte [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md), [MERCADO_LIVRE_AUTOMATICO.md](MERCADO_LIVRE_AUTOMATICO.md) e [PUBLICADOR_MERCADO_LIVRE.md](PUBLICADOR_MERCADO_LIVRE.md).
+
+## KaBuM / Awin
+
+`radar_kabum.py` aceita Product Feed direto ou a Product Feed List da Awin. A versão atual reconhece o feed KaBuM, prioriza Feed ID 46967/Advertiser 17729 por padrão, mantém cache local e histórico SQLite e detecta quedas comprovadas de preço.
+
+O módulo permanece seguro por padrão: **não publica no Telegram**. Consulte [KABUM_AWIN.md](KABUM_AWIN.md).
+
+## Recuperação e persistência
+
+O monitor reprocessa por padrão mensagens recentes ao iniciar. A fila e o banco local preservam a continuidade e evitam rajadas/repetições. Preserve especialmente:
+
+- `.env`;
+- `monitor_ofertas.session`;
+- `publicacoes.sqlite3` e arquivos WAL/SHM associados;
+- filas locais e `imagens_ofertas/`;
+- histórico/cache KaBuM local quando desejar preservar a linha de base.
 
 ## Testes
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -p "test_*.py" -v
+py -m unittest discover -p "test_*.py" -v
 ```
 
-A suíte inclui testes do monitor, da integração de afiliados e do radar direto Shopee. Usam respostas simuladas; não fazem compras nem publicações reais. Essa cobertura se concentra nos componentes de monitoramento/Shopee; não comprova o funcionamento real do radar Mercado Livre.
+O GitHub Actions executa testes com serviços simulados e sem credenciais de produção. Testes locais com APIs reais continuam necessários para validar autenticação e disponibilidade externa.
 
-## O que fica fora do Git
+## Segurança
 
-O `.gitignore` exclui credenciais, sessão do Telegram, filas, banco de publicações, fotos captadas, tokens, arquivos locais de anúncios e links, caches e arquivos compactados de backup. O logotipo `assets/radar_de_ofertas_menor_1mb.png` está incluído como recurso do projeto.
+Trate o repositório como potencialmente público. Nunca versione `.env`, sessão Telegram, cookies, CSRF, tokens, URLs privadas de feed, bancos, filas ou arquivos de catálogo baixados. O `.gitignore` cobre os artefatos operacionais conhecidos.
 
-O arquivo `.session` permite acesso à conta Telegram. Não faça upload do pacote original do projeto para o GitHub. Se alguma credencial ou sessão tiver sido publicada, revogue-a e gere outra; apagar o arquivo do último commit não remove o histórico anterior.
+## Documentação
 
-## Atualizações
-
-Depois de configurar o repositório remoto, mantenha esta estrutura de arquivos e envie apenas alterações revisadas de código e documentação. Não habilite envios de ofertas por workflows do GitHub: os testes automatizados não precisam de tokens reais.
-
-
-## Cupons e publicação integrada
-
-Consulte [INTEGRACAO.md](INTEGRACAO.md) para instalar os alertas de cupons,
-prioridade das ofertas dos grupos e radar com intervalo de 10 minutos.
-Diagnóstico sem envio: `py cupons_shopee.py --testar "URL_DO_CUPOM"`.
-
-
-## Banner incluído no GitHub
-
-A arte original está em `assets/banner_cupons.parts/`, dividida em partes Base64
-para evitar a falha do envio binário pela integração. O bot restaura automaticamente
-`assets/banner_cupons.png` quando necessário, verificando tamanho e SHA-256.
-Não há alteração de pixels ou dependência de download. Para restaurar manualmente:
-`py banner_asset.py`. Preserve a pasta de partes ao copiar o projeto.
-
-Incluídas as correções de `**R$ 2.713,08**` e `💵2,943`, captura de edições,
-bloqueio de ofertas sem preço, valor em negrito e condições em linha separada.
+- [Operação atual](docs/operacao.md)
+- [Arquitetura](docs/arquitetura.md)
+- [Radar Shopee](docs/radar-shopee.md)
+- [Integração de grupos/cupons](INTEGRACAO.md)
+- [KaBuM/Awin](KABUM_AWIN.md)
+- [Continuidade do projeto](CONTINUIDADE.md)
