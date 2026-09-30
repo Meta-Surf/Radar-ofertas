@@ -128,9 +128,11 @@ Livre. O link original da loja é substituído pelo link de afiliado gerado pela
 credenciais locais. Se a conversão não puder ser confirmada, a publicação é
 bloqueada, sem fallback para o link do canal de origem.
 
-Mensagens reconhecidas como cupons não usam o modo espelho. Cupons Shopee e
+Somente mensagens exclusivas de cupons deixam o modo espelho. Cupons Shopee e
 Mercado Livre continuam entrando no fluxo atual, com banner próprio e o padrão
-do Radar. O modo espelho também reutiliza automaticamente a foto da publicação
+do Radar. Se uma oferta de produto trouxer também um código de cupom ou uma
+condição como `com cupom: CODIGO`, o cupom permanece no próprio texto da oferta
+e não gera uma segunda publicação. O modo espelho também reutiliza automaticamente a foto da publicação
 quando ela estiver disponível e o canal não tiver proteção contra encaminhamento.
 
 Para confirmar que a conta do Telegram enxerga o canal, pare temporariamente o
