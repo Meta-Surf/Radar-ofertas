@@ -39,6 +39,8 @@ class CanalEspelhoTests(unittest.TestCase):
         self.assertIsNone(button)
         self.assertNotIn("instagram", template.lower())
         self.assertNotIn(social, template)
+        self.assertNotIn("Saiba mais", template)
+        self.assertNotIn("exemplo.com", template)
         self.assertIn("R$ 399,00", template)
         self.assertIn("R$ 345,02", template)
         self.assertIn("(anúncio)", template)
