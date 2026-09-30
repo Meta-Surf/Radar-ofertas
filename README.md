@@ -2,6 +2,8 @@
 
 Automação em Python para monitorar ofertas e cupons, gerar links próprios de afiliado e publicar no Telegram com controle de prioridade, deduplicação e recuperação após reinício.
 
+> Imagens de canais específicos podem usar **rebranding visual** configurado por `TG_REBRAND_CHATS`: o monitor cobre banner e selo de preço da origem antes de publicar. Consulte `docs/operacao.md`.
+
 ## Estado atual — 30/09/2026
 
 | Componente | Estado |
