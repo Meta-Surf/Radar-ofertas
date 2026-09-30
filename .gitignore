@@ -44,3 +44,9 @@ venv/
 destinos_confirmados.json
 
 /assets/banner_cupons_ml.png
+
+# KaBuM/Awin: catálogo baixado e cache local (pode conter URLs afiliadas)
+kabum_feed_atual.csv
+kabum_feed_atual.csv.gz
+*Kabum*Datafeed*.csv
+*Kabum*Datafeed*.csv.gz
