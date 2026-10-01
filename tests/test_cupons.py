@@ -182,7 +182,14 @@ class CouponTests(unittest.TestCase):
 
     def test_coupon_publishes_during_radar_wait_and_deduplicates(self):
         raw = alert()
-        ready = dict(raw, affiliate_generated=True)
+        ready = dict(
+            raw,
+            affiliate_generated=True,
+            entries=[
+                dict(entry, affiliate_url=f'https://s.shopee.com.br/gate{index}')
+                for index, entry in enumerate(raw['entries'], 1)
+            ],
+        )
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
             ledger.mark_attempt(600, clock_id=2)

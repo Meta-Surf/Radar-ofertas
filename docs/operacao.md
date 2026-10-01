@@ -66,7 +66,8 @@ A ordem atual é:
 
 1. ofertas novas captadas ao vivo;
 2. ofertas recuperadas após reinício;
-3. Radar Shopee.
+3. cupons oficiais KaBuM elegíveis;
+4. Radar automático Shopee/KaBuM.
 
 As recuperadas usam `INTERVALO_RECUPERADAS` e não travam permanentemente uma oferta nova ao vivo.
 
@@ -116,6 +117,39 @@ cd /opt/radar
 ```
 
 A coluna de aproveitamento é `mensagens publicadas / mensagens recebidas`. A atribuição confiável começa a partir da ativação do recurso; não se tenta adivinhar retroativamente qual fonte merece crédito por publicações antigas.
+
+## Gate central pré-publicação
+
+O publicador executa `prepublicacao.py` imediatamente antes da reserva no ledger e antes de iniciar qualquer relógio de publicação.
+
+Configuração padrão:
+
+```env
+GATE_SOURCE_PRICE_MAX_AGE_SECONDS=300
+GATE_KABUM_FEED_MAX_AGE_SECONDS=1800
+```
+
+O primeiro valor limita por quanto tempo um preço explicitamente informado por uma origem pode ser aceito quando a loja não oferece revalidação forte daquele preço final. O segundo limita a idade máxima do Product Feed KaBuM usado para confirmar preço.
+
+Decisões do Gate ficam em `publicacoes.sqlite3`, tabela `prepublication_gate`. Para ver os motivos mais recentes:
+
+```bash
+cd /opt/radar
+./.venv/bin/python - <<'PY'
+import sqlite3
+db=sqlite3.connect("publicacoes.sqlite3")
+for row in db.execute("""
+SELECT datetime(checked,'unixepoch'),product,status,reason,old_price,new_price
+FROM prepublication_gate ORDER BY id DESC LIMIT 30
+"""):
+    print(row)
+db.close()
+PY
+```
+
+Bloqueios comuns: `PRECO_AUMENTOU`, `PRECO_VARIANTE_AMBIGUO`, `PRECO_NAO_REVALIDADO`, `CUPOM_EXPIRADO`, `CUPOM_INATIVO`, `LINK_INVALIDO`, `DUPLICADA`, `PRODUTO_INCONSISTENTE`, `SEM_ESTOQUE_COMPROVADO` e `VALIDACAO_INDISPONIVEL`.
+
+Uma oferta bloqueada pelo Gate não chama `Ledger.mark_attempt()`; o publicador continua para a próxima candidata sem consumir o intervalo de 20 minutos.
 
 ## Canal especial em modo espelho
 

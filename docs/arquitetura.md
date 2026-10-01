@@ -54,9 +54,23 @@ O OAuth em `mercadolivre_auth.py` permanece útil para experimentos/API, mas nã
 
 O Link Builder Awin é fallback para destinos KaBuM válidos que não tenham tracking disponível no feed.
 
+## Gate central pré-publicação
+
+`prepublicacao.py` é a última barreira antes de `Ledger.reserve()` e do relógio de publicação. Ele recebe a oferta original e a versão preparada pelo afiliado, revalida o que cada fonte consegue comprovar e só então libera a reserva.
+
+- Radar Shopee: preço/atividade são reconsultados pela API;
+- Shopee de grupo: identidade/link são revalidados; preço final com cupom/Pix só é aceito da origem por até 5 minutos;
+- Mercado Livre automático: uma leitura pública recente confirma produto, preço total e disponibilidade; parcela nunca vira preço;
+- Mercado Livre manual: o link autorizado é preservado e preço explícito recente pode ser aceito por até 5 minutos;
+- KaBuM: o Product Feed precisa estar recente; preço maior bloqueia, preço menor atualiza; `out_of_stock` explícito bloqueia;
+- cupom KaBuM: `promotion_id` é reconsultado na Offers API antes do envio;
+- cupons Shopee/ML sem API de validade equivalente: alertas antigos demais são bloqueados.
+
+A tabela `prepublication_gate` em `publicacoes.sqlite3` registra `APROVADA`, `ATUALIZADA` ou `BLOQUEADA` e motivos como `PRECO_AUMENTOU`, `CUPOM_EXPIRADO`, `LINK_INVALIDO`, `DUPLICADA` e `SEM_ESTOQUE_COMPROVADO`. Uma rejeição ocorre antes de `mark_attempt`, portanto não gasta o slot de 20 minutos.
+
 ## Persistência
 
-`publicacoes.sqlite3` armazena reservas, publicações, relógios e dados usados pela inteligência/histórico. Filas, banco, sessão, mídia e caches são locais e ignorados pelo Git.
+`publicacoes.sqlite3` armazena reservas, publicações, relógios, auditoria do Gate e dados usados pela inteligência/histórico. Filas, banco, sessão, mídia e caches são locais e ignorados pelo Git.
 
 ## Testes
 

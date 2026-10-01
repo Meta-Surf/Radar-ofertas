@@ -134,7 +134,11 @@ class IntelligenceTests(unittest.TestCase):
         a,b=offer(1),offer(2)
         self.i.enqueue([a,b])
         client=Mock()
-        client.prepare.side_effect=[AffiliateError('Indisponível'),dict(b)]
+        client.prepare.side_effect=[
+            AffiliateError('Indisponível'),
+            dict(b, affiliate_url='https://s.shopee.com.br/gateok',
+                 affiliate_generated=True, price_from=False),
+        ]
         with patch.object(publisher,'Ledger',return_value=self.ledger), \
              patch.object(publisher.ShopeeAffiliate,'from_env',return_value=client), \
              patch.object(publisher,'rows',return_value=iter([])), \

@@ -18,6 +18,7 @@ import cupons_kabum as kabum_coupons
 import mercadolivre_manual as ml_manual
 import canal_espelho as mirror
 from metricas_fontes import SourceMetrics
+from prepublicacao import PrePublicationGate, GateReject
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -183,9 +184,14 @@ def run_publisher(args, parser):
     announced = set()
     retry_at = {}
     prepared_coupons = {}
+    gate_blocked = {}
     from mercadolivre_auto import AutoReader
     auto_reader = AutoReader()
-    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre/KaBuM e listas de cupons. Ctrl+C para parar.')
+    gate = PrePublicationGate(
+        BASE, ledger.db, shopee=affiliate, ml_affiliate=ml_affiliate,
+        kabum_affiliate=kabum_affiliate, ml_reader=auto_reader,
+    )
+    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre/KaBuM e listas de cupons com Gate pré-publicação. Ctrl+C para parar.')
     try:
         while True:
             if not args.simular:
@@ -195,6 +201,13 @@ def run_publisher(args, parser):
                     continue
             for offer in ordered_rows(intelligence, channel):
                 key = offer.get('product_id')
+                source_key = key
+                revision = json.dumps(offer, sort_keys=True, ensure_ascii=False, default=str)
+                if source_key in gate_blocked:
+                    if gate_blocked[source_key] == revision:
+                        continue
+                    del gate_blocked[source_key]
+                original_offer = dict(offer)
                 is_coupon = offer.get('kind') == 'coupon_alert'
                 is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
                 is_kabum_coupon = is_coupon and offer.get('store') == 'KaBuM'
@@ -273,6 +286,7 @@ def run_publisher(args, parser):
                                 metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
                                 continue
                             offer = ready
+                            offer.setdefault('auto_fetched_at', time.time())
                             key = offer.get('product_id')
                             is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                             is_ml_offer = offer.get('kind') == 'ml_offer'
@@ -332,12 +346,6 @@ def run_publisher(args, parser):
                     continue
                 if not args.simular and origin == 'radar' and ledger.publication_delay(clock_id=2) > 0:
                     continue
-                if not args.simular:
-                    states = ledger.db.execute('SELECT status FROM posts WHERE product=?', (key,)).fetchall()
-                    if states and (any(state[0] != 'sent' for state in states)
-                                   or not intelligence.can_repeat(offer, channel)):
-                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
-                        continue
                 day = None
                 theme = offer.get('tema_radar')
                 try:
@@ -366,6 +374,22 @@ def run_publisher(args, parser):
                         intelligence.discard(key)
                     retry_at[key] = time.monotonic() + 300
                     continue
+
+                try:
+                    offer = gate.validate(original_offer, offer, channel)
+                    key = offer['product_id']
+                except GateReject as error:
+                    state = 'REJEITADA' if error.discard else 'AGUARDANDO'
+                    metrics.record_offer(offer, state, error.reason)
+                    print(str(error), '| motivo:', error.reason)
+                    if error.discard:
+                        gate_blocked[source_key] = revision
+                        if origin == 'radar':
+                            intelligence.discard(key)
+                    elif error.retry_after:
+                        retry_at[key] = time.monotonic() + error.retry_after
+                    continue
+
                 if not is_coupon and not is_mirror:
                     if offer.get('source') != 'kabum_feed':
                         offer['history_badge'] = intelligence.badge(offer, channel)

@@ -20,7 +20,11 @@ class IntegrationTests(unittest.TestCase):
         g1, g2 = offer(1, 'telegram'), offer(2, 'telegram')
         r1, r2 = offer(3, 'shopee_api'), offer(4, 'shopee_api')
         client = Mock()
-        client.prepare.side_effect = lambda o: dict(o)
+        client.prepare.side_effect = lambda o: dict(
+            o, store='Shopee',
+            affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
         with tempfile.TemporaryDirectory() as d:
             ledger = Ledger(Path(d) / 'posts.db')
             try:
@@ -79,7 +83,11 @@ class IntegrationTests(unittest.TestCase):
             discount=30,
         )
         client = Mock()
-        client.prepare.side_effect = lambda offer: dict(offer)
+        client.prepare.side_effect = lambda offer: dict(
+            offer, store='Shopee',
+            affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
         with tempfile.TemporaryDirectory() as d:
             ledger = Ledger(Path(d) / 'posts.db')
             try:

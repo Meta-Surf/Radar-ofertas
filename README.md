@@ -16,6 +16,7 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 | Mercado Livre | Ofertas de grupos monitorados e entrada manual integradas; geração automática de afiliado usa sessão do Link Builder |
 | Cupons Mercado Livre | Ativo; listas exclusivas usam arte própria e o Social configurado |
 | KaBuM | KaBuM 2.0 em produção via Awin: Product Feed, histórico, ranking, Link Builder, Offers API, cupons oficiais e publicação unificada no Telegram |
+| Gate pré-publicação | Ativo; revalida identidade, link, preço/validade quando há fonte confiável, deduplicação e estoque explícito antes do envio |
 | Amazon | Pendente |
 | Instagram e WhatsApp | Publicação multicanal pendente |
 
@@ -29,6 +30,12 @@ O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
 4. Radar automático Shopee/KaBuM.
 
 As ofertas captadas não aguardam os 20 minutos do radar. Mensagens de produto que contêm um código de cupom continuam sendo uma única publicação; somente mensagens dedicadas exclusivamente a cupons entram no fluxo visual próprio.
+
+## Gate central pré-publicação
+
+`prepublicacao.py` roda imediatamente antes da reserva/envio. Ele bloqueia aumento de preço, faixa/valor ambíguo, link inválido, produto divergente, cupom expirado/inativo, indisponibilidade explícita e duplicação. Se uma fonte confiável comprovar preço menor, a publicação é atualizada para o novo valor antes do envio. Decisões são gravadas em `prepublication_gate` dentro de `publicacoes.sqlite3`; bloqueios não consomem o slot do radar.
+
+A validação forte é usada no Radar Shopee (API), Mercado Livre automático (leitura pública), KaBuM (feed recente) e cupons KaBuM (Offers API). Ofertas de grupo Shopee com preço final condicionado a cupom/Pix não têm esse valor final exposto pela API; por isso só usam preço da origem por até 5 minutos, com identidade/link revalidados, sem afirmar uma confirmação de preço inexistente.
 
 ## Canal especial
 
