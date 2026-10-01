@@ -166,7 +166,7 @@ def run_publisher(args, parser):
         ml_affiliate = None
         print("Afiliados Mercado Livre indisponível:", str(e), "| links automáticos ML ficarão bloqueados.")
     try:
-        kabum_affiliate = KabumAffiliate(BASE / 'kabum_historico.sqlite3')
+        kabum_affiliate = KabumAffiliate.from_env(BASE / 'kabum_historico.sqlite3')
     except AffiliateError as e:
         kabum_affiliate = None
         print("Afiliados KaBuM/Awin indisponível:", str(e), "| ofertas KaBuM ficarão aguardando.")
@@ -319,7 +319,7 @@ def run_publisher(args, parser):
                         continue
                     if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
                         continue
-                origin = ('radar' if offer.get('source') == 'shopee_api'
+                origin = ('radar' if offer.get('source') in ('shopee_api', 'kabum_feed')
                           else ('recuperada' if is_recovered else 'telegram'))
                 if not args.simular and is_recovered and ledger.publication_delay(clock_id=4) > 0:
                     continue
@@ -360,7 +360,10 @@ def run_publisher(args, parser):
                     retry_at[key] = time.monotonic() + 300
                     continue
                 if not is_coupon and not is_mirror:
-                    offer['history_badge'] = intelligence.badge(offer, channel)
+                    if offer.get('source') != 'kabum_feed':
+                        offer['history_badge'] = intelligence.badge(offer, channel)
+                    else:
+                        offer['history_badge'] = str(offer.get('history_badge') or '')
                 day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
                 if not args.simular and not day:
                     metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')

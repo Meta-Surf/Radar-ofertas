@@ -2,7 +2,7 @@
 
 ## Estado
 
-Integração validada localmente em 30/09/2026 em **modo diagnóstico**.
+Integração validada e colocada em produção em 01/10/2026. A execução manual sem `--enfileirar` continua diagnóstica.
 
 A versão atual de `radar_kabum.py`:
 
@@ -16,9 +16,9 @@ A versão atual de `radar_kabum.py`:
 - registra produtos e histórico de preços em SQLite;
 - informa produtos novos e preços alterados;
 - detecta quedas comprovadas pelo próprio histórico;
-- **não publica no Telegram**.
+- em execução manual permanece diagnóstico por padrão; em produção, `--enfileirar` entrega candidatas ao publicador unificado real.
 
-Na validação local mais recente, a lista Awin selecionou o feed KaBuM BR/Portuguese, o catálogo retornou 4.953 linhas e todas as 4.953 foram registradas como produtos válidos.
+Na validação mais recente na VPS, o catálogo KaBuM/Awin contém 4.992 produtos e 5.442 registros históricos de preço.
 
 ## Configuração
 
@@ -30,10 +30,16 @@ KABUM_AWIN_ADVERTISER_ID=17729
 KABUM_AWIN_FEED_ID=46967
 KABUM_AWIN_LANGUAGE=pt_BR
 KABUM_MIN_QUEDA_PCT=5
+KABUM_QUEUE_LIMIT=20
+KABUM_CANDIDATE_MAX_AGE_HOURS=24
 KABUM_FEED_CACHE=kabum_feed_atual.csv.gz
 KABUM_DOWNLOAD_TIMEOUT=60
 KABUM_DOWNLOAD_TENTATIVAS=3
 KABUM_FEED_DELIMITADOR=
+KABUM_ENHANCED_LOCALE=pt_BR
+AWIN_PUBLISHER_ID=
+AWIN_ACCESS_TOKEN=
+AWIN_API_TIMEOUT=30
 ```
 
 `KABUM_AWIN_FEED_URL` é privada e não deve ser versionada.
@@ -87,20 +93,7 @@ Quando o download falha, o script pode usar um cache válido ou um feed manual e
 
 Uma queda só aparece quando existe uma observação histórica anterior maior que o preço atual. A primeira coleta cria a linha de base e não deve ser tratada como promoção por si só.
 
-O feed atual não é usado pelo projeto para afirmar automaticamente “promoção do dia”. O módulo também não publica ranking no Telegram nesta fase.
-
-## Próxima etapa
-
-Antes de publicar ofertas KaBuM, o projeto ainda precisa definir e testar:
-
-1. ranking de relevância;
-2. regras de categoria/marca;
-3. intervalo e prioridade em relação aos demais canais;
-4. deduplicação com o histórico de publicações;
-5. mensagem/padrão visual;
-6. critérios para promoções temporárias quando houver evidência confiável no feed.
-
-A publicação deve permanecer desligada até essas regras estarem consolidadas.
+O feed atual não é usado para afirmar automaticamente “promoção do dia”. A produção publica apenas candidatas que passam pelos critérios de queda, ranking, idade, deduplicação e disponibilidade conhecida.
 
 ## Integração com grupos monitorados — Passo 1
 
@@ -112,7 +105,33 @@ Implementado em 01/10/2026.
 - o link publicado vem exclusivamente de `affiliate_url` / `aw_deep_link` do Product Feed Awin;
 - o link Awin é validado como `https://www.awin1.com/pclick.php` do anunciante KaBuM (`m=17729`);
 - canais em modo espelho também aceitam produto KaBuM e substituem somente o link da loja;
-- se o ID KaBuM não existir no feed atual, a oferta fica aguardando e **não** usa o link comum como fallback;
-- o Link Builder da Awin ainda não faz parte deste passo.
+- se o ID KaBuM não existir no feed atual, a oferta só usa fallback quando o Link Builder oficial da Awin estiver configurado; caso contrário fica aguardando;
+- o link comum KaBuM nunca é tratado como link afiliado.
 
-`radar_kabum.py` continua em modo diagnóstico: esta etapa habilita somente ofertas KaBuM originadas nos grupos monitorados.
+## KaBuM 2.0 — produção
+
+Implementado em 01/10/2026 com publicação pela fila unificada.
+
+- o serviço de radar existente executa a rodada KaBuM a cada 20 minutos;
+- somente quedas de preço comprovadas e recentes entram como candidatas (padrão: >= 5% e até 24h);
+- produtos novos criam linha de base, mas não são tratados como promoção;
+- o histórico usa janelas comprovadas de 15 em 15 dias: 15, 30, 45, ..., 180;
+- só é exibida a maior janela comprovada para o preço atual;
+- ranking KaBuM combina queda, histórico, marcas prioritárias, categorias prioritárias, promoção oficial e estoque confirmado;
+- JBL, NVIDIA e AMD recebem prioridade adicional;
+- categorias de acessórios como suportes/cabos/adaptadores não recebem bônus por palavras como TV/notebook;
+- estoque explicitamente indisponível é bloqueado; estoque vazio é tratado como desconhecido, nunca como confirmação;
+- `publicacoes.sqlite3` controla deduplicação e republicação apenas com preço menor após 24h;
+- ofertas dos grupos continuam com prioridade sobre as ofertas automáticas;
+- o publicador central aplica o intervalo do radar também à KaBuM.
+
+### APIs Awin opcionais
+
+Com `AWIN_PUBLISHER_ID` e `AWIN_ACCESS_TOKEN` configurados:
+
+- Link Builder gera tracking link quando o produto de grupo não consta no Product Feed;
+- Offers API consulta apenas ofertas ativas da KaBuM (`advertiserId=17729`, `membership=joined`, região BR);
+- vouchers só são associados quando a oferta oficial aponta diretamente para o mesmo produto;
+- Enhanced Feed fornece `availability`; `out_of_stock` bloqueia a candidata.
+
+Sem essas credenciais, a produção pelo Product Feed continua funcionando normalmente e os recursos opcionais permanecem desligados.

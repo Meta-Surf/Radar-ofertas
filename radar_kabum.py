@@ -8,7 +8,8 @@ Se receber a lista de feeds, o programa localiza automaticamente o feed KaBuM
 (Advertiser 17729 / Feed 46967 por padrão), baixa o Product Feed real, valida,
 salva cache local e atualiza o histórico de preços.
 
-Modo seguro: NÃO publica no Telegram.
+A execução manual sem --enfileirar continua diagnóstica. Em produção, o módulo
+alimenta a fila persistente do publicador unificado; ele nunca envia diretamente.
 """
 from __future__ import annotations
 
@@ -26,11 +27,24 @@ import urllib.error
 import urllib.request
 import zipfile
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB_NAME = "kabum_historico.sqlite3"
 DEFAULT_CACHE = "kabum_feed_atual.csv.gz"
-USER_AGENT = "RadarOfertas-Kabum/1.1"
+USER_AGENT = "RadarOfertas-Kabum/2.0"
+HISTORY_WINDOWS = tuple(range(15, 181, 15))
+DAY = 86400
+PRIORITY_BRANDS = ("jbl", "nvidia", "amd")
+PRIORITY_CATEGORY_TERMS = (
+    "placa de video", "placas de video", "gpu", "processador", "processadores", "cpu",
+    "notebook", "monitor", "smartphone", "celular", "tablet", "ssd",
+    "memoria ram", "televisor", "tv",
+)
+LOW_PRIORITY_CATEGORY_TERMS = (
+    "suporte", "cabo", "adaptador", "case", "capa", "pelicula", "mousepad",
+    "organizador", "extensao",
+)
 
 PRODUCT_REQUIRED = {
     "aw_deep_link",
@@ -428,9 +442,10 @@ def init_db(path: Path):
     return db
 
 
-def ingest(raw: bytes, db):
+def ingest(raw: bytes, db, return_changed_ids=False):
     now = time.time()
     total = valid = changes = new_products = 0
+    changed_ids = []
     reader, delimiter = _csv_reader(raw)
 
     fields = _fields(reader)
@@ -467,6 +482,7 @@ def ingest(raw: bytes, db):
                 )
             elif old[0] != price:
                 changes += 1
+                changed_ids.append(pid)
                 db.execute(
                     "INSERT INTO kabum_price_history(product_id,price_cents,observed) "
                     "VALUES(?,?,?)",
@@ -508,7 +524,8 @@ def ingest(raw: bytes, db):
                 ),
             )
 
-    return total, valid, new_products, changes
+    result = (total, valid, new_products, changes)
+    return (*result, changed_ids) if return_changed_ids else result
 
 
 def drops(db, minimum_pct=5, limit=20):
@@ -545,6 +562,238 @@ def brl(cents):
     )
 
 
+
+def history_window_days(db, product_id, current_cents, now=None):
+    """Maior janela 15..180 dias em que o preço atual é o menor comprovado."""
+    now = time.time() if now is None else now
+    first = db.execute(
+        "SELECT MIN(observed) FROM kabum_price_history WHERE product_id=?",
+        (product_id,),
+    ).fetchone()[0]
+    if first is None:
+        return 0
+
+    for days in reversed(HISTORY_WINDOWS):
+        start = now - days * DAY
+        if first > start:
+            continue
+        at_start = db.execute(
+            """SELECT price_cents FROM kabum_price_history
+               WHERE product_id=? AND observed<=?
+               ORDER BY observed DESC LIMIT 1""",
+            (product_id, start),
+        ).fetchone()
+        if not at_start:
+            continue
+        prices = [at_start[0]]
+        prices.extend(
+            row[0] for row in db.execute(
+                """SELECT price_cents FROM kabum_price_history
+                   WHERE product_id=? AND observed>? AND observed<=?""",
+                (product_id, start, now),
+            )
+        )
+        if prices and current_cents <= min(prices):
+            return days
+    return 0
+
+
+def _category_priority(name, category):
+    category_text = norm(category)
+    if any(term in category_text for term in LOW_PRIORITY_CATEGORY_TERMS):
+        return False
+    text = norm(f"{category} {name}")
+    return any(term in text for term in PRIORITY_CATEGORY_TERMS)
+
+
+def _brand_priority(name, brand):
+    text = norm(f"{brand} {name}")
+    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text)
+               for term in PRIORITY_BRANDS)
+
+
+def production_candidates(db, minimum_pct=5, limit=20, max_age_hours=24,
+                          availability=None, official_offers=None, now=None):
+    """Monta ofertas reais apenas de quedas recentes e comprovadas."""
+    from awin_kabum import stock_allows_publication, stock_confirmed
+
+    now = time.time() if now is None else now
+    availability = availability or {}
+    official_offers = official_offers or {}
+    cutoff = now - max(1, float(max_age_hours)) * 3600
+    rows = db.execute(
+        """SELECT product_id,name,brand,category,price_cents,affiliate_url,
+                  image_url,in_stock,last_seen
+           FROM kabum_products"""
+    ).fetchall()
+    out = []
+    stamp = datetime.now(timezone.utc).isoformat()
+
+    for pid, name, brand, category, current, affiliate, image, legacy_stock, last_seen in rows:
+        latest_current = db.execute(
+            """SELECT MAX(observed) FROM kabum_price_history
+               WHERE product_id=? AND price_cents=?""",
+            (pid, current),
+        ).fetchone()[0]
+        if latest_current is None or latest_current < cutoff:
+            continue
+        previous = db.execute(
+            """SELECT price_cents FROM kabum_price_history
+               WHERE product_id=? AND price_cents<>?
+               ORDER BY observed DESC LIMIT 1""",
+            (pid, current),
+        ).fetchone()
+        if not previous or previous[0] <= current:
+            continue
+        pct = (previous[0] - current) * 100 / previous[0]
+        if pct < minimum_pct:
+            continue
+
+        stock = availability.get(pid) or legacy_stock or ""
+        if not stock_allows_publication(stock):
+            continue
+
+        history_days = history_window_days(db, pid, current, now)
+        priority_brand = _brand_priority(name, brand)
+        priority_category = _category_priority(name, category)
+        product_offers = official_offers.get(f"KaBuM:{pid}", [])
+        official = product_offers[0] if product_offers else {}
+        coupon_code = next(
+            (str(item.get("coupon") or "").strip()
+             for item in product_offers if str(item.get("coupon") or "").strip()),
+            "",
+        )
+        score = (
+            min(pct, 40) * 1.5
+            + (history_days / 15) * 2
+            + 35 * priority_brand
+            + 25 * priority_category
+            + 15 * bool(official)
+            + 5 * stock_confirmed(stock)
+        )
+        badge = (
+            f"📉 Menor preço observado nos últimos {history_days} dias."
+            if history_days
+            else f"📉 Queda de {pct:.1f}% confirmada no histórico KaBuM/Awin."
+        )
+        offer = {
+            "product_id": f"KaBuM:{pid}",
+            "store": "KaBuM",
+            "url": f"https://www.kabum.com.br/produto/{pid}",
+            "source": "kabum_feed",
+            "kind": "product_offer",
+            "name": name,
+            "brand": brand,
+            "category": category,
+            "price": brl(current).replace("R$ ", ""),
+            "price_condition": "",
+            "price_from": False,
+            "coupon": coupon_code,
+            "api_image": image if str(image).startswith("https://") else "",
+            "source_date": stamp,
+            "captured_at": stamp,
+            "discount": round(pct, 2),
+            "kabum_drop_pct": round(pct, 2),
+            "kabum_previous_price_cents": previous[0],
+            "kabum_history_days": history_days,
+            "history_badge": badge,
+            "kabum_brand_priority": priority_brand,
+            "kabum_category_priority": priority_category,
+            "official_promotion": bool(official),
+            "official_offer_title": str(official.get("title") or "").strip(),
+            "stock_status": stock,
+            "stock_confirmed": stock_confirmed(stock),
+            "radar_score": round(score, 3),
+            "variant_id": pid,
+            "variant_verified": True,
+        }
+        out.append(offer)
+
+    out.sort(key=lambda item: (-item["radar_score"], item["product_id"]))
+    return out[:max(1, int(limit))]
+
+
+def production_round(base=None, channel="", minimum_pct=None, limit=None, max_age_hours=None):
+    """Atualiza feed e entrega candidatos KaBuM ao publicador unificado."""
+    from types import SimpleNamespace
+    from awin_kabum import AwinKabumAPI
+    from ofertas_core import Ledger
+    from inteligencia_ofertas import Intelligence
+
+    base = Path(base or Path(__file__).resolve().parent)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(base / ".env", encoding="utf-8-sig")
+    except ImportError:
+        pass
+    args = SimpleNamespace(arquivo=None, url=None, sem_fallback=False)
+    raw, source_description = resolve_feed(args, base)
+    db = init_db(base / DB_NAME)
+    try:
+        total, valid, new_products, changes, changed_ids = ingest(
+            raw, db, return_changed_ids=True
+        )
+        api = AwinKabumAPI.from_env()
+        availability = {}
+        official = {}
+        api_notes = []
+        if api.enabled:
+            try:
+                availability = api.enhanced_availability()
+                api_notes.append(f"estoque Enhanced: {len(availability)} produtos")
+            except Exception as exc:
+                api_notes.append(f"estoque Enhanced indisponível ({type(exc).__name__})")
+            try:
+                official = api.product_offer_map()
+                api_notes.append(f"Offers oficiais: {sum(map(len, official.values()))}")
+            except Exception as exc:
+                api_notes.append(f"Offers API indisponível ({type(exc).__name__})")
+        else:
+            api_notes.append("APIs Awin opcionais aguardando credenciais")
+
+        minimum_pct = (
+            float(os.getenv("KABUM_MIN_QUEDA_PCT", "5") or 5)
+            if minimum_pct is None else float(minimum_pct)
+        )
+        limit = (
+            max(1, int(os.getenv("KABUM_QUEUE_LIMIT", "20") or 20))
+            if limit is None else max(1, int(limit))
+        )
+        max_age = (
+            max(1, float(os.getenv("KABUM_CANDIDATE_MAX_AGE_HOURS", "24") or 24))
+            if max_age_hours is None else max(1, float(max_age_hours))
+        )
+        candidates = production_candidates(
+            db, minimum_pct=minimum_pct, limit=limit, max_age_hours=max_age,
+            availability=availability, official_offers=official,
+        )
+    finally:
+        db.close()
+
+    ledger = Ledger(base / "publicacoes.sqlite3")
+    try:
+        intelligence = Intelligence(ledger.db)
+        intelligence.enqueue(candidates)
+        kabum_pending = [
+            offer for offer in intelligence.pending(channel)
+            if offer.get("source") == "kabum_feed"
+        ]
+    finally:
+        ledger.db.close()
+
+    return {
+        "source": source_description,
+        "total": total,
+        "valid": valid,
+        "new_products": new_products,
+        "changes": changes,
+        "changed_ids": changed_ids,
+        "candidates": candidates,
+        "pending": len(kabum_pending),
+        "api_notes": api_notes,
+    }
+
+
 def main():
     base = Path(__file__).resolve().parent
     try:
@@ -563,6 +812,10 @@ def main():
     parser.add_argument("--queda-min", type=float, default=None)
     parser.add_argument("--limite", type=int, default=20)
     parser.add_argument(
+        "--enfileirar", action="store_true",
+        help="Atualiza o feed e entrega candidatas ao publicador unificado real."
+    )
+    parser.add_argument(
         "--sem-fallback",
         action="store_true",
         help="Se o download falhar, não usa cache/feed local.",
@@ -577,6 +830,24 @@ def main():
         parser.error("--queda-min deve ficar entre 0 e 100.")
     if args.limite < 1:
         parser.error("--limite deve ser pelo menos 1.")
+
+    if args.enfileirar:
+        try:
+            result = production_round(
+                base, os.getenv("TELEGRAM_CANAL", ""),
+                minimum_pct=minimum_pct, limit=args.limite,
+            )
+        except Exception as exc:
+            parser.exit(1, f"Erro na rodada KaBuM de produção: {exc}\n")
+        print(
+            f"KaBuM produção: {result['valid']} produtos; "
+            f"{result['changes']} preços alterados; "
+            f"{len(result['candidates'])} candidatas; "
+            f"{result['pending']} na fila."
+        )
+        for note in result["api_notes"]:
+            print("-", note)
+        return
 
     try:
         raw, source_description = resolve_feed(args, base)

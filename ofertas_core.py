@@ -358,6 +358,11 @@ def caption(offer):
         parts.append(price_line)
         if offer.get('history_badge'):
             parts.append(html.escape(offer['history_badge']))
+        if offer.get('official_offer_title'):
+            parts.append('🏷️ Oferta oficial KaBuM/Awin: ' +
+                         html.escape(str(offer['official_offer_title'])[:180]))
+        if offer.get('stock_confirmed') is True:
+            parts.append('✅ Disponibilidade confirmada no feed Awin.')
         if offer.get('source') == 'shopee_api':
             parts.append('Antes de cupons e descontos de pagamento.')
         elif offer.get('price_condition'):

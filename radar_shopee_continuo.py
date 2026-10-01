@@ -389,6 +389,26 @@ def run_loop(args, parser):
             print('Falha operacional; detalhes sensíveis omitidos. Confira rede, arquivos e configuração.')
             if not args.loop:
                 raise SystemExit(1)
+
+        if args.enfileirar:
+            try:
+                from radar_kabum import production_round
+                kabum = production_round(
+                    Path(__file__).resolve().parent,
+                    os.getenv('TELEGRAM_CANAL', ''),
+                )
+                print(
+                    'KaBuM produção:',
+                    kabum['valid'], 'produtos;',
+                    kabum['changes'], 'preços alterados;',
+                    len(kabum['candidates']), 'candidatas;',
+                    kabum['pending'], 'na fila.'
+                )
+                for note in kabum['api_notes']:
+                    print('KaBuM:', note)
+            except Exception as error:
+                print('KaBuM: rodada falhou sem interromper Shopee |', type(error).__name__)
+
         if not args.loop:
             break
         args.round_index += 1

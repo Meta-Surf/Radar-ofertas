@@ -27,6 +27,11 @@ def cents(offer):
 
 
 def comparison_key(offer):
+    # KaBuM usa merchant_product_id estável do feed; não há variante inferida.
+    if offer.get('store') == 'KaBuM' or offer.get('source') == 'kabum_feed':
+        return hashlib.sha256(
+            json.dumps([offer['product_id'], 'kabum_feed'], ensure_ascii=False).encode()
+        ).hexdigest()
     # Não presumir variante a partir de preço mínimo, título ou preço único.
     variant = offer.get('variant_id')
     if offer.get('price_from') or not variant or not offer.get('variant_verified'):
@@ -85,7 +90,7 @@ class Intelligence:
         with self.db:
             self.db.execute('DELETE FROM radar_queue WHERE expires<=?', (now,))
             for offer in offers:
-                if offer.get('source') != 'shopee_api' or not cents(offer):
+                if offer.get('source') not in ('shopee_api', 'kabum_feed') or not cents(offer):
                     continue
                 self.db.execute('''INSERT INTO radar_queue VALUES (?,?,?,?)
                   ON CONFLICT(product) DO UPDATE SET payload=excluded.payload,
@@ -156,6 +161,8 @@ class Intelligence:
         # Marca, categoria premium e histórico influenciam o ranking.
         # Loja oficial só conta quando houver sinal booleano explícito da origem.
         def rank(o):
+            if o.get('source') == 'kabum_feed':
+                return float(o.get('radar_score', 0) or 0)
             return (quality(o) + 12 * brand_match(o)
                     + 18 * bool(o.get('radar_premium'))
                     + 10 * (o.get('official_store') is True)
