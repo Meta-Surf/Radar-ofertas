@@ -95,6 +95,28 @@ A pausa tem precedência sobre captura normal, mídia, modo espelho e rebranding
 
 No diagnóstico de uma mensagem, o monitor exibe `Pausado: True` quando a origem estiver suspensa.
 
+## Métricas de qualidade por fonte
+
+As métricas usam o próprio `publicacoes.sqlite3`, portanto entram no backup operacional já existente. Cada mensagem de origem é identificada por `chat_id + message_id` e mantém estado atual, motivo, loja/produto quando conhecidos, presença de preço/imagem e publicação final.
+
+Estados: `RECEBIDA`, `CAPTADA`, `AGUARDANDO`, `REJEITADA`, `PUBLICADA`.
+
+Motivos comuns incluem `PRECO_AUSENTE`, `SEM_IMAGEM`, `SEM_PRODUTO`, `MULTIPLOS_PRODUTOS`, `LINK_NAO_RESOLVIDO`, `REDIRECIONADOR_BLOQUEADO`, `AFILIADO_INDISPONIVEL`, `AFILIADO_FALHOU`, `LEITURA_ML`, `EXPIRADA` e `DUPLICADA`.
+
+A instrumentação é **fail-open**: erro ao gravar métrica gera aviso, mas não muda a decisão de captura/publicação.
+
+Relatórios:
+
+```bash
+cd /opt/radar
+./.venv/bin/python relatorio_fontes.py --periodo 24h
+./.venv/bin/python relatorio_fontes.py --periodo 7d
+./.venv/bin/python relatorio_fontes.py --periodo 30d
+./.venv/bin/python relatorio_fontes.py --periodo total
+```
+
+A coluna de aproveitamento é `mensagens publicadas / mensagens recebidas`. A atribuição confiável começa a partir da ativação do recurso; não se tenta adivinhar retroativamente qual fonte merece crédito por publicações antigas.
+
 ## Canal especial em modo espelho
 
 Use a ID numérica no `.env`:

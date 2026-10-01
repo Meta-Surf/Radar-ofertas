@@ -223,6 +223,14 @@ class CaptureFlowTests(unittest.TestCase):
             self.assertEqual([row['price'] for row in offers], ['113,00', '109,00'])
             self.assertTrue(all(row['image'] for row in offers))
             self.assertEqual([call.args[0] for call in resolver.call_args_list], [PRODUCT, PRODUCT])
+            import sqlite3
+            db = sqlite3.connect(Path(directory) / 'publicacoes.sqlite3')
+            metric = db.execute(
+                'SELECT status,captured,source_username FROM source_messages '
+                'WHERE chat_id=? AND source_message_id=?', ('-123', 123)
+            ).fetchone()
+            db.close()
+            self.assertEqual(metric, ('CAPTADA', 1, 'origem'))
 
     def test_startup_recovery_replays_recent_message_once_and_live_duplicate_is_skipped(self):
         import json

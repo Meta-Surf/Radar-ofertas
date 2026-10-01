@@ -90,6 +90,21 @@ Mantenha a fonte cadastrada em `TG_CHATS` e, quando quiser suspendê-la sem perd
 
 Para reativar, remova somente a origem de `TG_PAUSED_CHATS` e reinicie o monitor.
 
+### Métricas de qualidade das fontes
+
+O monitor e o publicador registram, de forma fail-open, o ciclo de cada mensagem Telegram em `publicacoes.sqlite3`. Os estados são `RECEBIDA`, `CAPTADA`, `AGUARDANDO`, `REJEITADA` e `PUBLICADA`; falhas de métricas nunca bloqueiam uma oferta.
+
+Relatórios disponíveis:
+
+```bash
+python relatorio_fontes.py --periodo 24h
+python relatorio_fontes.py --periodo 7d
+python relatorio_fontes.py --periodo 30d
+python relatorio_fontes.py --periodo total
+```
+
+O relatório mostra mensagens recebidas, captadas, publicadas, rejeitadas, aguardando, aproveitamento e principais causas por fonte. A contagem confiável começa após a ativação desse recurso; não é feita atribuição retroativa de publicação a mensagens antigas.
+
 ## Shopee
 
 O radar contínuo lê `radar_categorias.json`, atualmente com 43 temas em 6 grupos. Os filtros mínimos, regras de título, marcas prioritárias, fila persistente e histórico estão documentados em [docs/radar-shopee.md](docs/radar-shopee.md).

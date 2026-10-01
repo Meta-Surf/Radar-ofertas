@@ -15,6 +15,7 @@ from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
 import mercadolivre_manual as ml_manual
 import canal_espelho as mirror
+from metricas_fontes import SourceMetrics
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -122,6 +123,20 @@ def valid_price(offer):
     info = price_info('R$ ' + value)
     return bool(info and info['price'] == value and not info['price_condition'])
 
+
+def metric_reason_from_error(error):
+    text = str(error or '').lower()
+    if 'preço' in text:
+        return 'PRECO_AUSENTE'
+    if 'imagem' in text:
+        return 'SEM_IMAGEM'
+    if 'tema' in text:
+        return 'TEMA_INVALIDO'
+    if 'afiliad' in text or 'api' in text or 'link' in text:
+        return 'AFILIADO_FALHOU'
+    return 'PREPARACAO_FALHOU'
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--simular', action='store_true')
@@ -152,6 +167,7 @@ def run_publisher(args, parser):
     recovery_max_age = max(1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45')))
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
+    metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
     from inteligencia_ofertas import Intelligence
     intelligence = Intelligence(ledger.db)
     announced = set()
@@ -181,42 +197,52 @@ def run_publisher(args, parser):
                     if marker not in announced:
                         print('Oferta Mercado Livre captada, mas o gerador de afiliado está indisponível:', key)
                         announced.add(marker)
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
                 if not (is_ml_offer or is_ml_pending) and affiliate is None and not is_ml_coupon and not is_ml_manual:
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
                 if not isinstance(key, str):
                     continue
                 if is_ml_manual:
                     if not ml_manual.trusted(offer.get('chat_id')):
+                        metrics.record_offer(offer, 'REJEITADA', 'ORIGEM_NAO_AUTORIZADA')
                         continue
                 elif is_ml_pending:
                     if (not ml_manual.allowed_link(offer.get('url'))
                             or offer.get('product_id') != ml_manual.pending_key(offer['url'])):
+                        metrics.record_offer(offer, 'REJEITADA', 'LINK_INVALIDO')
                         continue
                     offer['store'] = 'Mercado Livre'
                 elif not is_coupon:
                     checked = product(offer.get('url', ''))
                     if not checked or checked[0] != key or checked[2] != offer['url']:
+                        metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
                         continue
                     offer['store'] = checked[1]
                     if checked[1] not in ('Shopee', 'Mercado Livre'):
                         if key not in announced:
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
+                        metrics.record_offer(offer, 'AGUARDANDO', 'LOJA_NAO_INTEGRADA')
                         continue
                     if checked[1] == 'Mercado Livre' and not is_ml_offer:
+                        metrics.record_offer(offer, 'REJEITADA', 'FLUXO_ML_INVALIDO')
                         continue
                 try:
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
                 except (KeyError, TypeError, ValueError):
+                    metrics.record_offer(offer, 'REJEITADA', 'DATA_INVALIDA')
                     continue
                 allowed_age = min(max_age, recovery_max_age) if is_recovered else max_age
                 if age < -60 or age > allowed_age * 60:
+                    metrics.record_offer(offer, 'REJEITADA', 'EXPIRADA')
                     continue
                 if is_ml_manual or is_ml_offer or is_ml_pending:
                     if time.monotonic() < retry_at.get(key, 0):
                         continue
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
+                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
                         continue
                     needs_public_data = (is_ml_pending or (not is_mirror and (
                                          not offer.get('name') or not valid_price(offer)
@@ -229,6 +255,7 @@ def run_publisher(args, parser):
                                 if marker not in announced:
                                     print('Buscando título, preço e imagem do link Mercado Livre:', key)
                                     announced.add(marker)
+                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
                                 continue
                             offer = ready
                             key = offer.get('product_id')
@@ -237,6 +264,7 @@ def run_publisher(args, parser):
                             if not isinstance(key, str):
                                 continue
                             if is_ml_pending:
+                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
                                 print('Leitura automática ML ainda não normalizou o produto:', key)
                                 retry_at[key] = time.monotonic() + 300
                                 continue
@@ -244,10 +272,12 @@ def run_publisher(args, parser):
                                 checked = product(offer.get('url', ''))
                                 if (not checked or checked[0] != key or checked[1] != 'Mercado Livre'
                                         or checked[2] != offer['url']):
+                                    metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
                                     print('Leitura ML retornou produto inconsistente; publicação bloqueada:', key)
                                     retry_at[key] = time.monotonic() + 300
                                     continue
                         except AffiliateError as error:
+                            metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
                             print('Leitura automática ML pendente:', key, '|', str(error))
                             retry_at[key] = time.monotonic() + 300
                             continue
@@ -256,6 +286,7 @@ def run_publisher(args, parser):
                     if marker not in announced:
                         print('Aguardando preço explícito ou edição na origem:', key)
                         announced.add(marker)
+                    metrics.record_offer(offer, 'AGUARDANDO', 'PRECO_AUSENTE')
                     continue
                 if time.monotonic() < retry_at.get(key, 0):
                     continue
@@ -269,6 +300,7 @@ def run_publisher(args, parser):
                         offer = prepared_coupons[raw_key]
                         key = offer['product_id']
                     except AffiliateError as error:
+                        metrics.record_offer(offer, 'AGUARDANDO', metric_reason_from_error(error))
                         print(str(error))
                         retry_at[raw_key] = time.monotonic() + 300
                         continue
@@ -284,6 +316,7 @@ def run_publisher(args, parser):
                     states = ledger.db.execute('SELECT status FROM posts WHERE product=?', (key,)).fetchall()
                     if states and (any(state[0] != 'sent' for state in states)
                                    or not intelligence.can_repeat(offer, channel)):
+                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
                         continue
                 day = None
                 theme = offer.get('tema_radar')
@@ -305,6 +338,7 @@ def run_publisher(args, parser):
                 except AffiliateError as e:
                     if day:
                         ledger.release(key, day)
+                    metrics.record_offer(offer, 'REJEITADA', metric_reason_from_error(e))
                     print(str(e))
                     if origin == 'radar':
                         intelligence.discard(key)
@@ -314,6 +348,7 @@ def run_publisher(args, parser):
                     offer['history_badge'] = intelligence.badge(offer, channel)
                 day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
                 if not args.simular and not day:
+                    metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
                     continue
                 image = ((ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon
                          else ((photo_path(offer) or offer.get('api_image')) if is_mirror
@@ -324,6 +359,7 @@ def run_publisher(args, parser):
                         announced.add(key)
                     if day:
                         ledger.release(key, day)
+                    metrics.record_offer(offer, 'AGUARDANDO', 'SEM_IMAGEM')
                     retry_at[key] = time.monotonic() + 60
                     continue
                 if args.simular:
@@ -343,16 +379,19 @@ def run_publisher(args, parser):
                         ledger.mark_attempt(recovery_interval, clock_id=4)
                     message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
                 except Exception:
+                    metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
                           '(Confira o canal; detalhes sensíveis foram omitidos.)')
                     break
                 if message_id is None:
                     ledger.release(key, day)
+                    metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_REJEITOU')
                     print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
                     retry_at[key] = time.monotonic() + max(wait, 1)
                     ledger.mark_attempt(max(wait, 1), clock_id=3)
                     break
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                metrics.record_offer(offer, 'PUBLICADA', published_message_id=message_id)
                 print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
                 break  # Lê novamente as filas e verifica a idade após a espera.
             if args.simular:

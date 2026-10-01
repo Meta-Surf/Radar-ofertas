@@ -20,6 +20,7 @@ import mercadolivre_manual as ml_manual
 from shopee_afiliados import AffiliateError
 import canal_espelho as mirror
 import imagem_marca as image_branding
+from metricas_fontes import SourceMetrics
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -74,6 +75,23 @@ def dialog_config_keys(dialog):
 
 def dialog_is_configured(dialog, configured):
     return bool(dialog_config_keys(dialog) & set(configured))
+
+
+def source_metric_context(chat_id, chat, messages):
+    username = str(getattr(chat, 'username', '') or '').strip()
+    name = str(getattr(chat, 'title', '') or getattr(chat, 'name', '') or username or chat_id)
+    return {
+        'source_name': name,
+        'source_username': username or None,
+        'source_date': messages[0].date.isoformat() if messages else None,
+    }
+
+
+def unresolved_metric_reason(reasons):
+    text = ' | '.join(str(x or '') for x in reasons)
+    if 'desconto.games' in text.lower() or 'redirecionamento' in text.lower():
+        return 'REDIRECIONADOR_BLOQUEADO'
+    return 'LINK_NAO_RESOLVIDO'
 
 
 def exclusive_coupon_message(text, messages, shopee_alerts=None, ml_alert=None):
@@ -265,6 +283,7 @@ async def main():
         recovery_limit = bounded_env_int('TG_RECUPERAR_MAX_MENSAGENS', 500, 20, 2000)
         recovery_state_path = BASE / 'monitor_recuperacao.json'
         recovery_state = load_monitor_state(recovery_state_path)
+        metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
 
         if args.diagnosticar:
             match = re.fullmatch(r'https://t\.me/([A-Za-z0-9_]+)/(\d+)/?', args.diagnosticar)
@@ -368,7 +387,14 @@ async def main():
         capture_lock = asyncio.Lock()
 
         async def capture_once(messages, chat_id, chat, digest=None, recovered=False):
+            metric_id = min(m.id for m in messages)
+            metric_meta = source_metric_context(chat_id, chat, messages)
+            def mark_metric(status, reason='', **extra):
+                metrics.record(chat_id, metric_id, status, reason,
+                               recovered=recovered, **metric_meta, **extra)
+            mark_metric('RECEBIDA')
             if not chat or getattr(chat, 'noforwards', False) or any(getattr(m, 'noforwards', False) for m in messages):
+                mark_metric('REJEITADA', 'CONTEUDO_PROTEGIDO')
                 print('Ignorada: conteúdo protegido ou chat indisponível.', chat_id)
                 return
             text = '\n'.join(m.raw_text or '' for m in messages)
@@ -377,22 +403,26 @@ async def main():
             coupon_only = exclusive_coupon_message(text, messages, alerts, ml_alert)
             if coupon_only:
                 if ml_alert:
-                    ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered)
+                    ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered, **metric_meta)
                     with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                         out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
+                    metrics.record_offer(ml_alert, 'CAPTADA')
                     print('Lista exclusiva de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
                     return
                 if alerts:
                     with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                         for alert in alerts:
-                            alert = dict(alert, capture_digest=digest, recovered=recovered)
+                            alert = dict(alert, capture_digest=digest, recovered=recovered, **metric_meta)
                             out.write(json.dumps(alert, ensure_ascii=False) + '\n')
+                    for alert in alerts:
+                        metrics.record_offer(dict(alert, **metric_meta), 'CAPTADA')
                     print('Mensagem exclusiva de cupons Shopee captada:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
                     return
             if ml_manual.trusted(chat_id):
                 try:
                     row = ml_manual.build_offer(messages, chat_id)
                 except AffiliateError as error:
+                    mark_metric('REJEITADA', 'OFERTA_INVALIDA')
                     print(str(error), '| mensagem', messages[0].id)
                     return
                 photo = next((m for m in messages if m.photo), None)
@@ -400,10 +430,12 @@ async def main():
                     downloaded_image = await save_offer_photo(photo, chat_id)
                     if downloaded_image:
                         row['image'] = downloaded_image
+                row.update(metric_meta)
                 row['capture_digest'] = digest
                 row['recovered'] = recovered
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                metrics.record_offer(row, 'CAPTADA')
                 print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
                 return
             # Se havia código/link de cupom junto de uma oferta de produto, ele não
@@ -419,8 +451,10 @@ async def main():
                     print('Canal espelho descartou página sem produto:', ignored_url, '|', ignored_reason)
                 if len(candidates) != 1:
                     if candidates:
+                        mark_metric('REJEITADA', 'MULTIPLOS_PRODUTOS')
                         print('Canal espelho ignorado: publicação contém mais de um produto de loja.', chat_id, messages[0].id)
                     else:
+                        mark_metric('REJEITADA', 'SEM_PRODUTO')
                         print('Canal espelho ignorado: nenhum link de produto de loja identificado.', chat_id, messages[0].id)
                     return
                 candidate = candidates[0]
@@ -432,6 +466,7 @@ async def main():
                 try:
                     mirror_template, mirror_button = mirror.build_template(messages, [source_url])
                 except AffiliateError as error:
+                    mark_metric('REJEITADA', 'OFERTA_INVALIDA')
                     print(str(error), '| mensagem', messages[0].id)
                     return
                 image = None
@@ -452,9 +487,10 @@ async def main():
                        'chat_id': chat_id, 'message_id': min(m.id for m in messages),
                        'captured_at': datetime.now(timezone.utc).isoformat(),
                        'source_date': messages[0].date.isoformat(),
-                       'capture_digest': digest, 'recovered': recovered}
+                       'capture_digest': digest, 'recovered': recovered, **metric_meta}
                 with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                     out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                metrics.record_offer(row, 'CAPTADA')
                 print('Oferta espelho captada:', key, '| loja:', store, '| imagem:', bool(image))
                 return
             urls = list(dict.fromkeys(u for m in messages for u in extract_links(m) if u not in excluded and safe_url(u)))
@@ -473,15 +509,20 @@ async def main():
                     unresolved.append(reason)
             # Um segundo link não resolvido fora do ML pode esconder outro produto.
             if unresolved:
+                mark_metric('REJEITADA', unresolved_metric_reason(unresolved))
                 print('Ignorada: não foi possível resolver todos os links do produto.',
                       chat_id, messages[0].id, '|', ' | '.join(dict.fromkeys(unresolved)))
                 return
             # Não associa uma única imagem/preço a vários produtos diferentes.
             if len(products) + len(pending_ml) != 1:
                 if products or pending_ml:
+                    mark_metric('REJEITADA', 'MULTIPLOS_PRODUTOS')
                     print('Ignorada: mensagem contém vários produtos ou links ambíguos.')
                 elif urls:
+                    mark_metric('REJEITADA', 'LINK_NAO_RESOLVIDO')
                     print('Ignorada: não foi possível resolver o link do produto.', chat_id, messages[0].id)
+                else:
+                    mark_metric('REJEITADA', 'SEM_PRODUTO')
                 return
             if pending_ml:
                 direct_url = next(iter(pending_ml))
@@ -493,6 +534,7 @@ async def main():
                 key, store, direct_url = next(iter(products.values()))
                 kind = 'ml_offer' if store == 'Mercado Livre' else 'product_offer'
             if store not in ('Shopee', 'Mercado Livre'):
+                mark_metric('REJEITADA', 'LOJA_NAO_SUPORTADA', store=store)
                 return
             image = None
             if str(chat_id) in allowed_media:
@@ -514,9 +556,10 @@ async def main():
                    'captured_at': datetime.now(timezone.utc).isoformat(),
                    'source_date': messages[0].date.isoformat(),
                    'capture_digest': digest,
-                   'recovered': recovered}
+                   'recovered': recovered, **metric_meta}
             with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
                 out.write(json.dumps(row, ensure_ascii=False) + '\n')
+            metrics.record_offer(row, 'CAPTADA')
             print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
                   '| condição:', row['price_condition'] or 'nenhuma',
                   '| imagem:', bool(image), '| cupom:', row['coupon'] or 'não identificado')
