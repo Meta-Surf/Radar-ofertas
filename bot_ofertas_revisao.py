@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as valid_ml_affiliate_url
+from kabum_afiliados import KabumAffiliate, valid_affiliate_url as valid_kabum_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
 import mercadolivre_manual as ml_manual
@@ -81,6 +82,9 @@ def send(token, channel, offer, image):
     elif offer.get('store') == 'Mercado Livre':
         if not valid_ml_affiliate_url(offer.get('affiliate_url')):
             raise AffiliateError('Publicação bloqueada: link de afiliado Mercado Livre inválido.')
+    elif offer.get('store') == 'KaBuM':
+        if not valid_kabum_affiliate_url(offer.get('affiliate_url')):
+            raise AffiliateError('Publicação bloqueada: link de afiliado KaBuM/Awin inválido.')
     elif not valid_affiliate_url(offer.get('affiliate_url')):
         raise AffiliateError('Publicação bloqueada: falta link gerado pela API de Afiliados.')
 
@@ -161,6 +165,11 @@ def run_publisher(args, parser):
     except AffiliateError as e:
         ml_affiliate = None
         print("Afiliados Mercado Livre indisponível:", str(e), "| links automáticos ML ficarão bloqueados.")
+    try:
+        kabum_affiliate = KabumAffiliate(BASE / 'kabum_historico.sqlite3')
+    except AffiliateError as e:
+        kabum_affiliate = None
+        print("Afiliados KaBuM/Awin indisponível:", str(e), "| ofertas KaBuM ficarão aguardando.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 1200  # Intervalo exclusivo das publicações originadas no radar.
     recovery_interval = max(5, int(os.getenv('INTERVALO_RECUPERADAS', '30')))
@@ -175,7 +184,7 @@ def run_publisher(args, parser):
     prepared_coupons = {}
     from mercadolivre_auto import AutoReader
     auto_reader = AutoReader()
-    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre e listas de cupons. Ctrl+C para parar.')
+    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre/KaBuM e listas de cupons. Ctrl+C para parar.')
     try:
         while True:
             if not args.simular:
@@ -190,6 +199,7 @@ def run_publisher(args, parser):
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
                 is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
+                is_kabum_offer = offer.get('store') == 'KaBuM'
                 is_mirror = offer.get('publish_mode') == 'mirror'
                 is_recovered = bool(offer.get('recovered')) and offer.get('source') != 'shopee_api'
                 if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
@@ -199,7 +209,10 @@ def run_publisher(args, parser):
                         announced.add(marker)
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
-                if not (is_ml_offer or is_ml_pending) and affiliate is None and not is_ml_coupon and not is_ml_manual:
+                if is_kabum_offer and kabum_affiliate is None:
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    continue
+                if not (is_ml_offer or is_ml_pending or is_kabum_offer) and affiliate is None and not is_ml_coupon and not is_ml_manual:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
                 if not isinstance(key, str):
@@ -220,7 +233,7 @@ def run_publisher(args, parser):
                         metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
                         continue
                     offer['store'] = checked[1]
-                    if checked[1] not in ('Shopee', 'Mercado Livre'):
+                    if checked[1] not in ('Shopee', 'Mercado Livre', 'KaBuM'):
                         if key not in announced:
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
@@ -326,6 +339,8 @@ def run_publisher(args, parser):
                             offer = ml_manual.prepare(offer)
                         elif is_ml_offer:
                             offer = ml_affiliate.prepare(offer)
+                        elif offer.get('store') == 'KaBuM':
+                            offer = kabum_affiliate.prepare(offer)
                         else:
                             offer = affiliate.prepare(offer)
                         if not is_mirror and not valid_price(offer):

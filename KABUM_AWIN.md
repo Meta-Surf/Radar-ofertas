@@ -101,3 +101,18 @@ Antes de publicar ofertas KaBuM, o projeto ainda precisa definir e testar:
 6. critérios para promoções temporárias quando houver evidência confiável no feed.
 
 A publicação deve permanecer desligada até essas regras estarem consolidadas.
+
+## Integração com grupos monitorados — Passo 1
+
+Implementado em 01/10/2026.
+
+- `ofertas_core.py` reconhece URLs `https://www.kabum.com.br/produto/ID/...` pela identidade estável `KaBuM:ID`;
+- `monitor_ofertas.py` aceita KaBuM entre as lojas de produto e enfileira a oferta dos grupos monitorados;
+- `kabum_afiliados.py` consulta `kabum_historico.sqlite3` pelo `merchant_product_id`;
+- o link publicado vem exclusivamente de `affiliate_url` / `aw_deep_link` do Product Feed Awin;
+- o link Awin é validado como `https://www.awin1.com/pclick.php` do anunciante KaBuM (`m=17729`);
+- canais em modo espelho também aceitam produto KaBuM e substituem somente o link da loja;
+- se o ID KaBuM não existir no feed atual, a oferta fica aguardando e **não** usa o link comum como fallback;
+- o Link Builder da Awin ainda não faz parte deste passo.
+
+`radar_kabum.py` continua em modo diagnóstico: esta etapa habilita somente ofertas KaBuM originadas nos grupos monitorados.

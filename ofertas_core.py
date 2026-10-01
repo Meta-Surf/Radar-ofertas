@@ -14,7 +14,8 @@ from urllib.parse import urljoin
 HOSTS = {'shopee.com.br', 'www.shopee.com.br', 's.shopee.com.br', 'shope.ee',
          'amazon.com.br', 'www.amazon.com.br', 'amzn.to',
          'mercadolivre.com.br', 'www.mercadolivre.com.br', 'produto.mercadolivre.com.br',
-         'mercadolivre.com', 'www.mercadolivre.com', 'meli.la'}
+         'mercadolivre.com', 'www.mercadolivre.com', 'meli.la',
+         'kabum.com.br', 'www.kabum.com.br'}
 
 # Intermediário usado nas ofertas enviadas pelo usuário; não é uma loja.
 PRODUCT_REDIRECTORS = {'desconto.games'}
@@ -50,6 +51,12 @@ def product(url):
         if m:
             shop, item = m.groups()
             return ('Shopee:' + shop + ':' + item, 'Shopee', f'https://shopee.com.br/product/{shop}/{item}')
+    if p.hostname in ('kabum.com.br', 'www.kabum.com.br'):
+        m = re.match(r'^/produto/(\d+)(?:/|$)', p.path, re.I)
+        if m:
+            item = m[1]
+            return ('KaBuM:' + item, 'KaBuM',
+                    'https://www.kabum.com.br/produto/' + item)
     if p.hostname.endswith('amazon.com.br'):
         m = re.search(r'/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?:/|$)', p.path, re.I)
         if m:

@@ -13,6 +13,7 @@ ML_HOSTS = {
     "mercadolivre.com.br", "www.mercadolivre.com.br",
     "produto.mercadolivre.com.br",
 }
+KABUM_HOSTS = {"kabum.com.br", "www.kabum.com.br"}
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 TAG_RE = re.compile(r"<[^>]+>")
 ANCHOR_RE = re.compile(r'<a href="([^"]+)">(.*?)</a>', re.I | re.S)
@@ -40,6 +41,8 @@ def supported_store_url(url):
         if parsed.path in ("", "/"):
             return False
         return not parsed.path.lower().startswith(("/social/", "/afiliados", "/ajuda", "/institucional"))
+    if host in KABUM_HOSTS:
+        return bool(re.match(r"^/produto/\d+(?:/|$)", parsed.path, re.I))
     return False
 
 
