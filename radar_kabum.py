@@ -717,6 +717,8 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
     """Atualiza feed e entrega candidatos KaBuM ao publicador unificado."""
     from types import SimpleNamespace
     from awin_kabum import AwinKabumAPI
+    from kabum_afiliados import KabumAffiliate
+    import cupons_kabum
     from ofertas_core import Ledger
     from inteligencia_ofertas import Intelligence
 
@@ -736,6 +738,7 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
         api = AwinKabumAPI.from_env()
         availability = {}
         official = {}
+        coupon_alerts = []
         api_notes = []
         if api.enabled:
             try:
@@ -744,8 +747,12 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
             except Exception as exc:
                 api_notes.append(f"estoque Enhanced indisponível ({type(exc).__name__})")
             try:
-                official = api.product_offer_map()
-                api_notes.append(f"Offers oficiais: {sum(map(len, official.values()))}")
+                offers = api.offers()
+                official = api.product_offer_map(offers)
+                coupon_affiliate = KabumAffiliate.from_env(base / DB_NAME)
+                coupon_alerts = cupons_kabum.collect_alerts(offers, coupon_affiliate)
+                api_notes.append(f"Offers oficiais em produtos: {sum(map(len, official.values()))}")
+                api_notes.append(f"Cupons KaBuM genéricos elegíveis: {len(coupon_alerts)}")
             except Exception as exc:
                 api_notes.append(f"Offers API indisponível ({type(exc).__name__})")
         else:
@@ -773,10 +780,15 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
     ledger = Ledger(base / "publicacoes.sqlite3")
     try:
         intelligence = Intelligence(ledger.db)
-        intelligence.enqueue(candidates)
+        intelligence.enqueue(candidates + coupon_alerts)
+        pending = list(intelligence.pending(channel))
         kabum_pending = [
-            offer for offer in intelligence.pending(channel)
+            offer for offer in pending
             if offer.get("source") == "kabum_feed"
+        ]
+        coupon_pending = [
+            offer for offer in pending
+            if offer.get("source") == "kabum_awin_coupon"
         ]
     finally:
         ledger.db.close()
@@ -789,7 +801,9 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
         "changes": changes,
         "changed_ids": changed_ids,
         "candidates": candidates,
+        "coupon_alerts": coupon_alerts,
         "pending": len(kabum_pending),
+        "coupon_pending": len(coupon_pending),
         "api_notes": api_notes,
     }
 

@@ -402,7 +402,8 @@ def run_loop(args, parser):
                     kabum['valid'], 'produtos;',
                     kabum['changes'], 'preços alterados;',
                     len(kabum['candidates']), 'candidatas;',
-                    kabum['pending'], 'na fila.'
+                    kabum['pending'], 'produtos na fila;',
+                    kabum.get('coupon_pending', 0), 'cupons oficiais na fila.'
                 )
                 for note in kabum['api_notes']:
                     print('KaBuM:', note)

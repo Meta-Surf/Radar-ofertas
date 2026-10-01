@@ -135,3 +135,27 @@ Com `AWIN_PUBLISHER_ID` e `AWIN_ACCESS_TOKEN` configurados:
 - Enhanced Feed fornece `availability`; `out_of_stock` bloqueia a candidata.
 
 Sem essas credenciais, a produção pelo Product Feed continua funcionando normalmente e os recursos opcionais permanecem desligados.
+
+## Cupons oficiais KaBuM / Awin
+
+Implementado em 01/10/2026.
+
+- a Offers API é consultada no mesmo ciclo de 20 minutos do radar;
+- vouchers ligados diretamente a um produto continuam anexados somente àquele produto;
+- vouchers genéricos recebem identidade persistente `KaBuMCoupon:<promotion_id>`;
+- a deduplicação é feita pelo `promotion_id` em `publicacoes.sqlite3`;
+- cada cupom genérico é uma publicação independente, evitando misturar validade/condições;
+- cupons genéricos têm prioridade sobre ofertas automáticas, mas respeitam o relógio de 20 minutos do radar;
+- ofertas captadas dos grupos continuam com prioridade máxima;
+- o texto publicado usa apenas título, descrição, código, validade e condições recebidos da Awin;
+- URLs embutidas no título/descrição são removidas da legenda; o destino publicado é o tracking Awin validado;
+- se `urlTracking` não for válido, o Link Builder oficial é usado como fallback;
+- a arte usada é `assets/banner_cupons_kabum.png` e não contém código/desconto fixo.
+
+### Filtro de segurança para vouchers antigos
+
+A Offers API pode manter registros marcados como ativos mesmo quando o texto promocional é antigo ou contradiz a validade estruturada.
+Por isso, o fluxo genérico exige início da promoção nos últimos 90 dias, além de `startDate <= agora < endDate`.
+Na validação de 01/10/2026, 19 vouchers genéricos foram encontrados: 12 passaram nos critérios atuais e 7 registros iniciados em 2025 foram bloqueados.
+
+Também são exigidos: anunciante KaBuM `17729`, parceria `joined`, código de voucher válido, destino HTTPS no domínio KaBuM, ausência de vínculo direto com produto e tracking Awin válido.

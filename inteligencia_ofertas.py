@@ -90,12 +90,23 @@ class Intelligence:
         with self.db:
             self.db.execute('DELETE FROM radar_queue WHERE expires<=?', (now,))
             for offer in offers:
-                if offer.get('source') not in ('shopee_api', 'kabum_feed') or not cents(offer):
+                source = offer.get('source')
+                if source not in ('shopee_api', 'kabum_feed', 'kabum_awin_coupon'):
                     continue
+                if source != 'kabum_awin_coupon' and not cents(offer):
+                    continue
+                expires = now + TTL
+                if source == 'kabum_awin_coupon':
+                    try:
+                        expires = min(expires, float(offer.get('queue_expires_at') or expires))
+                    except (TypeError, ValueError):
+                        pass
+                    if expires <= now:
+                        continue
                 self.db.execute('''INSERT INTO radar_queue VALUES (?,?,?,?)
                   ON CONFLICT(product) DO UPDATE SET payload=excluded.payload,
                   refreshed=excluded.refreshed, expires=excluded.expires''',
-                  (offer['product_id'], json.dumps(offer, ensure_ascii=False), now, now + TTL))
+                  (offer['product_id'], json.dumps(offer, ensure_ascii=False), now, expires))
 
     def discard(self, product):
         with self.db:
@@ -135,6 +146,8 @@ class Intelligence:
         now = time.time() if now is None else now
         value = cents(offer)
         if not value:
+            if offer.get('source') == 'kabum_awin_coupon':
+                self.db.execute('DELETE FROM radar_queue WHERE product=?', (offer['product_id'],))
             return
         # Transação do chamador: a confirmação e o histórico são atômicos.
         self.db.execute('INSERT OR IGNORE INTO price_history '
@@ -161,7 +174,7 @@ class Intelligence:
         # Marca, categoria premium e histórico influenciam o ranking.
         # Loja oficial só conta quando houver sinal booleano explícito da origem.
         def rank(o):
-            if o.get('source') == 'kabum_feed':
+            if o.get('source') in ('kabum_feed', 'kabum_awin_coupon'):
                 return float(o.get('radar_score', 0) or 0)
             return (quality(o) + 12 * brand_match(o)
                     + 18 * bool(o.get('radar_premium'))

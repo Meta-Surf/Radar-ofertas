@@ -229,7 +229,7 @@ Esses valores não pertencem ao GitHub.
 
 ## KaBuM / Awin
 
-O módulo atual é diagnóstico e não participa do `INICIAR_INTEGRADO.bat`.
+Na VPS, o KaBuM 2.0 participa do ciclo do serviço `radar-shopee.service` e entrega ofertas/cupons ao publicador unificado. A execução manual sem `--enfileirar` continua disponível para diagnóstico.
 
 Execute:
 
@@ -237,7 +237,7 @@ Execute:
 py radar_kabum.py
 ```
 
-Ele aceita `KABUM_AWIN_FEED_URL`, reconhece Product Feed List ou Product Feed, mantém cache e histórico local e mostra quedas comprovadas. Consulte [../KABUM_AWIN.md](../KABUM_AWIN.md).
+Ele aceita `KABUM_AWIN_FEED_URL`, reconhece Product Feed List ou Product Feed, mantém cache/histórico e mostra quedas comprovadas. Com `AWIN_PUBLISHER_ID` e `AWIN_ACCESS_TOKEN`, também usa Link Builder e Offers API. Cupons oficiais genéricos elegíveis usam arte própria. Consulte [../KABUM_AWIN.md](../KABUM_AWIN.md).
 
 ## Dados locais que devem ser preservados
 
@@ -277,7 +277,7 @@ py -m unittest discover -p "test_*.py" -v
 - monitor: `Monitorando ... chats`, `Oferta captada`, `Oferta espelho captada`;
 - radar: atualização/enfileiramento de candidatos;
 - publicador: `Publicado: ... | origem: telegram` ou `origem: radar`;
-- KaBuM: total de linhas/produtos válidos e `Modo diagnóstico`.
+- KaBuM: produtos válidos, preços alterados, candidatos, produtos/cupons na fila e estado das APIs Awin.
 
 ## Regras de segurança
 

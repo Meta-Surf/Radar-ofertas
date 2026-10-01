@@ -15,7 +15,7 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 | Cupons Shopee | Ativo; mensagens exclusivas de cupons usam arte e padrão próprios |
 | Mercado Livre | Ofertas de grupos monitorados e entrada manual integradas; geração automática de afiliado usa sessão do Link Builder |
 | Cupons Mercado Livre | Ativo; listas exclusivas usam arte própria e o Social configurado |
-| KaBuM | Integração Awin em modo diagnóstico; Product Feed, cache e histórico de preços validados localmente; ainda não publica no Telegram |
+| KaBuM | KaBuM 2.0 em produção via Awin: Product Feed, histórico, ranking, Link Builder, Offers API, cupons oficiais e publicação unificada no Telegram |
 | Amazon | Pendente |
 | Instagram e WhatsApp | Publicação multicanal pendente |
 
@@ -25,7 +25,8 @@ O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
 
 1. ofertas novas captadas nos grupos/canais;
 2. ofertas recuperadas após reinício;
-3. Radar Shopee.
+3. cupons oficiais KaBuM elegíveis;
+4. Radar automático Shopee/KaBuM.
 
 As ofertas captadas não aguardam os 20 minutos do radar. Mensagens de produto que contêm um código de cupom continuam sendo uma única publicação; somente mensagens dedicadas exclusivamente a cupons entram no fluxo visual próprio.
 
@@ -82,7 +83,7 @@ Principais grupos de configuração:
 - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;
-- KaBuM/Awin: `KABUM_AWIN_FEED_URL` e opções de seleção/cache descritas em [KABUM_AWIN.md](KABUM_AWIN.md).
+- KaBuM/Awin: `KABUM_AWIN_FEED_URL`, `AWIN_PUBLISHER_ID`, `AWIN_ACCESS_TOKEN` e demais opções descritas em [KABUM_AWIN.md](KABUM_AWIN.md).
 
 ### Pausa temporária de fontes Telegram
 
@@ -123,9 +124,9 @@ Consulte [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md), [MERCADO_LIVR
 
 ## KaBuM / Awin
 
-`radar_kabum.py` aceita Product Feed direto ou a Product Feed List da Awin. A versão atual reconhece o feed KaBuM, prioriza Feed ID 46967/Advertiser 17729 por padrão, mantém cache local e histórico SQLite e detecta quedas comprovadas de preço.
+`radar_kabum.py` participa do ciclo de produção. Ele atualiza o Product Feed, mantém histórico SQLite, detecta quedas comprovadas, usa Link Builder como fallback e consulta a Offers API. Produtos e cupons oficiais elegíveis entram na fila persistente e são enviados pelo publicador unificado, respeitando prioridade e deduplicação.
 
-O módulo permanece seguro por padrão: **não publica no Telegram**. Consulte [KABUM_AWIN.md](KABUM_AWIN.md).
+Cupons genéricos KaBuM usam `cupons_kabum.py` e `assets/banner_cupons_kabum.png`. Consulte [KABUM_AWIN.md](KABUM_AWIN.md).
 
 ## Recuperação e persistência
 

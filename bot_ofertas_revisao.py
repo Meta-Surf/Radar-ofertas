@@ -14,6 +14,7 @@ from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as
 from kabum_afiliados import KabumAffiliate, valid_affiliate_url as valid_kabum_affiliate_url
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
+import cupons_kabum as kabum_coupons
 import mercadolivre_manual as ml_manual
 import canal_espelho as mirror
 from metricas_fontes import SourceMetrics
@@ -196,6 +197,7 @@ def run_publisher(args, parser):
                 key = offer.get('product_id')
                 is_coupon = offer.get('kind') == 'coupon_alert'
                 is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
+                is_kabum_coupon = is_coupon and offer.get('store') == 'KaBuM'
                 is_ml_manual = offer.get('kind') == 'ml_manual_offer'
                 is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
@@ -309,7 +311,12 @@ def run_publisher(args, parser):
                     raw_key = key
                     try:
                         if raw_key not in prepared_coupons:
-                            prepared_coupons[raw_key] = (ml_coupons.prepare_alert(offer) if is_ml_coupon else prepare_alert(affiliate, offer))
+                            if is_ml_coupon:
+                                prepared_coupons[raw_key] = ml_coupons.prepare_alert(offer)
+                            elif is_kabum_coupon:
+                                prepared_coupons[raw_key] = kabum_coupons.prepare_alert(kabum_affiliate, offer)
+                            else:
+                                prepared_coupons[raw_key] = prepare_alert(affiliate, offer)
                         offer = prepared_coupons[raw_key]
                         key = offer['product_id']
                     except AffiliateError as error:
@@ -319,7 +326,7 @@ def run_publisher(args, parser):
                         continue
                     if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
                         continue
-                origin = ('radar' if offer.get('source') in ('shopee_api', 'kabum_feed')
+                origin = ('radar' if offer.get('source') in ('shopee_api', 'kabum_feed', 'kabum_awin_coupon')
                           else ('recuperada' if is_recovered else 'telegram'))
                 if not args.simular and is_recovered and ledger.publication_delay(clock_id=4) > 0:
                     continue
@@ -368,9 +375,13 @@ def run_publisher(args, parser):
                 if not args.simular and not day:
                     metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
                     continue
-                image = ((ml_coupons.banner_path(BASE) if is_ml_coupon else banner_path(BASE)) if is_coupon
-                         else ((photo_path(offer) or offer.get('api_image')) if is_mirror
-                               else (offer.get('api_image') or photo_path(offer))))
+                if is_coupon:
+                    image = (ml_coupons.banner_path(BASE) if is_ml_coupon
+                             else (kabum_coupons.banner_path(BASE) if is_kabum_coupon
+                                   else banner_path(BASE)))
+                else:
+                    image = ((photo_path(offer) or offer.get('api_image')) if is_mirror
+                             else (offer.get('api_image') or photo_path(offer)))
                 if require_photo and not image and not is_coupon:
                     if key not in announced:
                         print('Aguardando imagem autorizada:', key)
@@ -382,10 +393,18 @@ def run_publisher(args, parser):
                     continue
                 if args.simular:
                     if key not in announced:
-                        preview = ((ml_coupons.alert_caption(offer) if is_ml_coupon else alert_caption(offer)) if is_coupon
+                        preview = ((ml_coupons.alert_caption(offer) if is_ml_coupon
+                                    else (kabum_coupons.alert_caption(offer) if is_kabum_coupon
+                                          else alert_caption(offer))) if is_coupon
                                    else (mirror.render(offer.get('mirror_template'), offer.get('affiliate_url'))
                                          if is_mirror else caption(offer)))
-                        links = [] if is_ml_coupon else ([e['affiliate_url'] for e in offer['entries']] if is_coupon else [offer['affiliate_url']])
+                        if is_ml_coupon:
+                            links = []
+                        elif is_kabum_coupon:
+                            links = [offer['affiliate_url']]
+                        else:
+                            links = ([e['affiliate_url'] for e in offer['entries']]
+                                     if is_coupon else [offer['affiliate_url']])
                         print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                         announced.add(key)
                     continue
@@ -395,7 +414,10 @@ def run_publisher(args, parser):
                         ledger.mark_attempt(interval, clock_id=2)
                     elif is_recovered:
                         ledger.mark_attempt(recovery_interval, clock_id=4)
-                    message_id, wait = (ml_coupons.send_alert if is_ml_coupon else (send_alert if is_coupon else send))(token, channel, offer, image)
+                    sender = (ml_coupons.send_alert if is_ml_coupon
+                              else (kabum_coupons.send_alert if is_kabum_coupon
+                                    else (send_alert if is_coupon else send)))
+                    message_id, wait = sender(token, channel, offer, image)
                 except Exception:
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
@@ -409,6 +431,8 @@ def run_publisher(args, parser):
                     ledger.mark_attempt(max(wait, 1), clock_id=3)
                     break
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                if offer.get('source') == 'kabum_awin_coupon':
+                    intelligence.discard(key)
                 metrics.record_offer(offer, 'PUBLICADA', published_message_id=message_id)
                 print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
                 break  # Lê novamente as filas e verifica a idade após a espera.

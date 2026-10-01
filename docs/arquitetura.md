@@ -40,19 +40,19 @@ O OAuth em `mercadolivre_auth.py` permanece útil para experimentos/API, mas nã
 
 ## Cupons
 
-`cupons_shopee.py` e `cupons_mercadolivre.py` são acionados somente para mensagens dedicadas a cupons. Um código de cupom dentro de uma oferta de produto permanece no texto da própria oferta e não gera outra postagem.
+`cupons_shopee.py` e `cupons_mercadolivre.py` tratam mensagens dedicadas a cupons. `cupons_kabum.py` trata vouchers oficiais genéricos vindos da Offers API Awin. Um código vinculado diretamente a produto permanece associado somente àquela oferta.
 
 ## KaBuM / Awin
 
-`radar_kabum.py` é independente do publicador principal nesta fase. Ele:
+`radar_kabum.py` integra o ciclo de produção e não envia diretamente ao Telegram. Ele:
 
-- aceita Product Feed direto ou Product Feed List;
-- seleciona o feed KaBuM;
-- mantém cache local;
-- grava produtos e histórico em SQLite;
-- identifica quedas comprovadas.
+- atualiza Product Feed/cache/histórico KaBuM;
+- identifica quedas comprovadas e monta ranking;
+- consulta Offers API e associa promoções somente quando há vínculo comprovado;
+- enfileira vouchers genéricos elegíveis com identidade `KaBuMCoupon:<promotion_id>`;
+- usa a mesma fila, ledger, relógio de 20 minutos e publicador unificado dos demais radares.
 
-O módulo ainda não envia ao Telegram.
+O Link Builder Awin é fallback para destinos KaBuM válidos que não tenham tracking disponível no feed.
 
 ## Persistência
 

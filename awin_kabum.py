@@ -89,10 +89,10 @@ class AwinKabumAPI:
             and item.get("type") in {"promotion", "voucher"}
         )
 
-    def product_offer_map(self):
+    def product_offer_map(self, offers=None):
         """Associa oferta oficial somente quando a URL aponta ao mesmo produto KaBuM."""
         mapped = {}
-        for item in self.offers():
+        for item in (self.offers() if offers is None else offers):
             target = product(str(item.get("url") or ""))
             if not target or target[1] != "KaBuM":
                 continue
