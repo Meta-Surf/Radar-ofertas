@@ -13,8 +13,9 @@ Este arquivo registra o ponto operacional atual. Documentos de correções datad
 - Mensagens de produto com código de cupom permanecem como uma única oferta.
 - Somente mensagens exclusivas de cupons Shopee/Mercado Livre geram publicação própria com arte.
 - Mercado Livre possui fluxo automático de afiliado para ofertas monitoradas e fluxo manual separado.
-- KaBuM/Awin está em diagnóstico: feed, cache e histórico de preços funcionam; publicação ainda não está ligada.
-- Amazon, Instagram e WhatsApp continuam pendentes.
+- KaBuM/Awin 2.0 está em produção: feed, histórico, ranking, Link Builder, Offers API e cupons oficiais integrados.
+- Amazon Creators API está implementada em modo fail-closed e aguarda Partner Tag/Credential ID/Credential Secret.
+- Instagram e WhatsApp continuam pendentes.
 
 ## Dados que ficam apenas no computador
 
@@ -56,7 +57,8 @@ Antes de substituir arquivos em uma instalação existente, preserve os dados lo
 
 ## Próximas frentes
 
-1. acompanhar estabilidade das publicações reais e corrigir casos de parsing/link com exemplos concretos;
-2. evoluir o ranking e a publicação do KaBuM somente depois de acumular histórico confiável;
-3. integrar Amazon;
-4. preparar publicação multicanal para WhatsApp e Instagram sem duplicar a lógica de seleção.
+1. acompanhar a Resiliência ML e ampliar a taxa de resolução sem contornar bloqueios do site;
+2. cadastrar as credenciais Amazon Creators API para ativar a integração já implementada;
+3. acompanhar a disponibilidade de uma fonte oficial de estoque KaBuM;
+4. configurar `TELEGRAM_ADMIN_CHAT` se desejado para alertas privados de saúde;
+5. preparar publicação multicanal para WhatsApp e Instagram sem duplicar a lógica de seleção.

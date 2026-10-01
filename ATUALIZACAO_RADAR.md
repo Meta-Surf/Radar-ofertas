@@ -57,7 +57,7 @@ Falhas, simulações e envios incertos não contam como preços divulgados.
 O banco recebido contém posts e publication_clock, mas não preços históricos:
 não foram inventados ou importados valores para as divulgações antigas.
 
-Janelas implementadas: 30, 60, 90 e 180 dias. Mostra-se apenas o maior período
+Janelas implementadas: 15, 30, 45, 60, ..., 180 dias. Mostra-se apenas o maior período
 válido, exigindo acompanhamento desde o início da janela e pelo menos uma
 publicação comparável dentro dela. Empates usam “Iguala o menor preço divulgado”;
 quedas usam “Novo menor preço divulgado neste canal nos últimos N dias”.

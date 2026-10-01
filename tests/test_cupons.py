@@ -40,6 +40,33 @@ class CouponTests(unittest.TestCase):
         self.assertEqual(entries[2]['conditions'], 'R$ 30 OFF em R$ 169 em itens selecionados')
         self.assertNotIn('149', coupons.alert_caption(dict(entries=entries)))
 
+    def test_redirector_labeled_as_other_store_is_not_shopee_coupon(self):
+        entries = coupons.coupon_entries([message(
+            'Cupons ativos na Shopee\n\n'
+            'Amazon - Resgate o cupom de 10% OFF no anúncio\n'
+            'https://desconto.games/abc123\n\n'
+            'R$ 10 OFF em selecionados\n'
+            'https://s.shopee.com.br/oficial'
+        )])
+        self.assertEqual([e['url'] for e in entries], ['https://s.shopee.com.br/oficial'])
+
+    def test_prepare_keeps_valid_entries_when_one_redirector_fails(self):
+        raw = alert()
+        raw['entries'] = [
+            {'url': 'https://desconto.games/bloqueado', 'conditions': ''},
+            {'url': 'https://s.shopee.com.br/valido', 'conditions': 'R$ 10 OFF'},
+        ]
+        client = Mock()
+        client.generate_coupon_link.return_value = 'https://s.shopee.com.br/meu'
+        def resolve(url):
+            if 'desconto.games' in url:
+                raise AffiliateError('HTTP 403')
+            return 'https://shopee.com.br/m/cupons?voucherCode=OK'
+        with patch.object(coupons, 'resolve_coupon', side_effect=resolve):
+            ready = coupons.prepare_alert(client, raw)
+        self.assertEqual(len(ready['entries']), 1)
+        self.assertEqual(ready['entries'][0]['affiliate_url'], 'https://s.shopee.com.br/meu')
+
     def test_product_coupon_code_does_not_turn_product_into_alert(self):
         self.assertEqual(coupons.coupon_entries([message('Notebook\nPor R$ 1000\nCupom: TESTE10\nhttps://s.shopee.com.br/teste')]), [])
 

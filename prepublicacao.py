@@ -12,6 +12,7 @@ from inteligencia_ofertas import Intelligence, cents
 from shopee_afiliados import AffiliateError, valid_affiliate_url as valid_shopee_link
 from mercadolivre_afiliados import valid_affiliate_url as valid_ml_link
 from kabum_afiliados import valid_affiliate_url as valid_kabum_link
+from amazon_afiliados import valid_affiliate_url as valid_amazon_link
 import cupons_kabum
 import cupons_mercadolivre as ml_coupons
 
@@ -26,12 +27,13 @@ class GateReject(AffiliateError):
 
 class PrePublicationGate:
     def __init__(self, base, db, shopee=None, ml_affiliate=None,
-                 kabum_affiliate=None, ml_reader=None):
+                 kabum_affiliate=None, amazon_affiliate=None, ml_reader=None):
         self.base = Path(base)
         self.db = db
         self.shopee = shopee
         self.ml_affiliate = ml_affiliate
         self.kabum_affiliate = kabum_affiliate
+        self.amazon_affiliate = amazon_affiliate
         self.ml_reader = ml_reader
         self.source_price_max_age = max(
             60, int(os.getenv("GATE_SOURCE_PRICE_MAX_AGE_SECONDS", "300") or 300)
@@ -166,6 +168,11 @@ class PrePublicationGate:
                 query = parse_qs(urlparse(str(link)).query)
                 publishers = query.get("a", []) + query.get("awinaffid", [])
                 valid = self.kabum_affiliate.publisher_id in publishers
+        elif store == "Amazon":
+            valid = bool(
+                self.amazon_affiliate
+                and valid_amazon_link(link, self.amazon_affiliate.partner_tag)
+            )
         else:
             valid = False
         if not valid:
@@ -404,6 +411,15 @@ class PrePublicationGate:
                     current, "PRECO_NAO_REVALIDADO",
                     "Gate: produto KaBuM fora do feed e preço da origem ficou antigo.",
                     retry_after=300,
+                )
+        elif store == "Amazon":
+            strong = True
+            self._compare_price(original, current, strong=True)
+            if current.get("stock_confirmed") is not True:
+                self.reject(
+                    current, "SEM_ESTOQUE_COMPROVADO",
+                    "Gate: Amazon sem disponibilidade confirmada pela Creators API.",
+                    discard=True,
                 )
         elif store == "Shopee":
             if self._age_seconds(original) > self.source_price_max_age:

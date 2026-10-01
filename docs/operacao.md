@@ -240,6 +240,8 @@ O monitor identifica o produto, a leitura automática pode completar campos ause
 
 Nunca use parcela como preço total. Se título/preço/imagem/produto não puderem ser confirmados dentro das regras atuais, a oferta fica pendente ou é bloqueada.
 
+A leitura pública usa `mercadolivre_resiliencia.py`: falhas recebem backoff persistente; links com falhas repetidas entram em quarentena; e 5 respostas HTTP 403 distintas em até 5 minutos abrem um circuit breaker de 15 minutos. Isso evita repetir Playwright/HTTP contra páginas que o Mercado Livre está bloqueando.
+
 ### Grupo manual
 
 `ML_MANUAL_CHAT` define a entrada manual. Nesse fluxo, o link inserido pelo operador é preservado, pois já deve ser o seu próprio link.
@@ -272,6 +274,32 @@ py radar_kabum.py
 ```
 
 Ele aceita `KABUM_AWIN_FEED_URL`, reconhece Product Feed List ou Product Feed, mantém cache/histórico e mostra quedas comprovadas. Com `AWIN_PUBLISHER_ID` e `AWIN_ACCESS_TOKEN`, também usa Link Builder e Offers API. Cupons oficiais genéricos elegíveis usam arte própria. Consulte [../KABUM_AWIN.md](../KABUM_AWIN.md).
+
+O feed KaBuM disponível na conta não fornece estoque e o Enhanced Feed não está disponível; portanto estoque vazio continua sendo `DESCONHECIDO`, nunca `EM ESTOQUE`.
+
+## Amazon / Creators API
+
+A integração está pronta em `amazon_afiliados.py`, mas só entra em produção quando existirem no `.env`:
+
+```env
+AMAZON_PARTNER_TAG=
+AMAZON_CREATORS_CREDENTIAL_ID=
+AMAZON_CREATORS_CREDENTIAL_SECRET=
+AMAZON_CREATORS_TIMEOUT=30
+```
+
+Sem essas credenciais, ofertas Amazon ficam aguardando. Com credenciais válidas, preço, disponibilidade, título, imagem e link afiliado vêm da Creators API oficial e ainda passam pelo Gate. Consulte [../AMAZON_CREATORS.md](../AMAZON_CREATORS.md).
+
+## Saúde operacional
+
+```bash
+cd /opt/radar
+./.venv/bin/python radar_health.py
+./.venv/bin/python radar_health.py --json
+./.venv/bin/python radar_health.py --alert
+```
+
+`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM e estado das credenciais.
 
 ## Dados locais que devem ser preservados
 

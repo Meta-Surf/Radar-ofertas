@@ -362,7 +362,12 @@ def caption(offer):
             parts.append('🏷️ Oferta oficial KaBuM/Awin: ' +
                          html.escape(str(offer['official_offer_title'])[:180]))
         if offer.get('stock_confirmed') is True:
-            parts.append('✅ Disponibilidade confirmada no feed Awin.')
+            if offer.get('store') == 'KaBuM':
+                parts.append('✅ Disponibilidade confirmada no feed Awin.')
+            elif offer.get('store') == 'Amazon':
+                parts.append('✅ Disponibilidade confirmada pela Amazon Creators API.')
+            else:
+                parts.append('✅ Disponibilidade confirmada pela fonte oficial.')
         if offer.get('source') == 'shopee_api':
             parts.append('Antes de cupons e descontos de pagamento.')
         elif offer.get('price_condition'):

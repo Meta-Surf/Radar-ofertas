@@ -12,6 +12,7 @@ from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
 from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as valid_ml_affiliate_url
 from kabum_afiliados import KabumAffiliate, valid_affiliate_url as valid_kabum_affiliate_url
+from amazon_afiliados import AmazonCreators
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
 import cupons_mercadolivre as ml_coupons
 import cupons_kabum as kabum_coupons
@@ -19,6 +20,7 @@ import mercadolivre_manual as ml_manual
 import canal_espelho as mirror
 from metricas_fontes import SourceMetrics
 from prepublicacao import PrePublicationGate, GateReject
+from mercadolivre_resiliencia import MLResilience
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -57,12 +59,23 @@ def ordered_rows(intelligence=None, channel=""):
         (recovered_groups if offer.get('recovered') else live_groups).append(offer)
     live_groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
     recovered_groups.sort(key=lambda o: str(o.get('source_date', '')), reverse=True)
-    yield from live_groups
-    yield from recovered_groups
+
+    seen_products = set()
+    def unique(bucket):
+        for offer in bucket:
+            key = offer.get('product_id')
+            if offer.get('kind') != 'coupon_alert' and key:
+                if key in seen_products:
+                    continue
+                seen_products.add(key)
+            yield offer
+
+    yield from unique(live_groups)
+    yield from unique(recovered_groups)
     if intelligence is None:
-        yield from radar
+        yield from unique(radar)
     else:
-        yield from intelligence.pending(channel)
+        yield from unique(intelligence.pending(channel))
 
 def photo_path(offer):
     value = offer.get('image')
@@ -172,6 +185,11 @@ def run_publisher(args, parser):
     except AffiliateError as e:
         kabum_affiliate = None
         print("Afiliados KaBuM/Awin indisponível:", str(e), "| ofertas KaBuM ficarão aguardando.")
+    try:
+        amazon_affiliate = AmazonCreators.from_env()
+    except AffiliateError as e:
+        amazon_affiliate = None
+        print("Amazon Creators API indisponível:", str(e), "| ofertas Amazon ficarão aguardando.")
     require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
     interval = 1200  # Intervalo exclusivo das publicações originadas no radar.
     recovery_interval = max(5, int(os.getenv('INTERVALO_RECUPERADAS', '30')))
@@ -187,11 +205,13 @@ def run_publisher(args, parser):
     gate_blocked = {}
     from mercadolivre_auto import AutoReader
     auto_reader = AutoReader()
+    ml_resilience = MLResilience(ledger.db)
     gate = PrePublicationGate(
         BASE, ledger.db, shopee=affiliate, ml_affiliate=ml_affiliate,
-        kabum_affiliate=kabum_affiliate, ml_reader=auto_reader,
+        kabum_affiliate=kabum_affiliate, amazon_affiliate=amazon_affiliate,
+        ml_reader=auto_reader,
     )
-    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre/KaBuM e listas de cupons com Gate pré-publicação. Ctrl+C para parar.')
+    print('Simulação: nada será publicado.' if args.simular else 'Publicador ativo: ofertas Shopee/Mercado Livre/KaBuM/Amazon e listas de cupons com Gate pré-publicação. Ctrl+C para parar.')
     try:
         while True:
             if not args.simular:
@@ -215,6 +235,7 @@ def run_publisher(args, parser):
                 is_ml_pending = offer.get('kind') == 'ml_offer_pending'
                 is_ml_offer = offer.get('kind') == 'ml_offer'
                 is_kabum_offer = offer.get('store') == 'KaBuM'
+                is_amazon_offer = offer.get('store') == 'Amazon'
                 is_mirror = offer.get('publish_mode') == 'mirror'
                 is_recovered = bool(offer.get('recovered')) and offer.get('source') != 'shopee_api'
                 if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
@@ -227,7 +248,10 @@ def run_publisher(args, parser):
                 if is_kabum_offer and kabum_affiliate is None:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
-                if not (is_ml_offer or is_ml_pending or is_kabum_offer) and affiliate is None and not is_ml_coupon and not is_ml_manual:
+                if is_amazon_offer and amazon_affiliate is None:
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    continue
+                if not (is_ml_offer or is_ml_pending or is_kabum_offer or is_amazon_offer) and affiliate is None and not is_ml_coupon and not is_ml_manual:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
                     continue
                 if not isinstance(key, str):
@@ -248,7 +272,7 @@ def run_publisher(args, parser):
                         metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
                         continue
                     offer['store'] = checked[1]
-                    if checked[1] not in ('Shopee', 'Mercado Livre', 'KaBuM'):
+                    if checked[1] not in ('Shopee', 'Mercado Livre', 'KaBuM', 'Amazon'):
                         if key not in announced:
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
@@ -266,6 +290,21 @@ def run_publisher(args, parser):
                 if age < -60 or age > allowed_age * 60:
                     metrics.record_offer(offer, 'REJEITADA', 'EXPIRADA')
                     continue
+
+                # Evita gastar API/navegador com itens que o ledger já bloquearia.
+                # Amazon fica de fora: a Creators API pode comprovar um preço atual menor.
+                if not is_coupon and not is_ml_pending and not is_amazon_offer:
+                    states = ledger.db.execute(
+                        'SELECT status FROM posts WHERE product=?', (key,)
+                    ).fetchall()
+                    if states and (
+                        any(state[0] != 'sent' for state in states)
+                        or not intelligence.can_repeat(offer, channel)
+                    ):
+                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA_PRE_FILTRO')
+                        gate_blocked[source_key] = revision
+                        continue
+
                 if is_ml_manual or is_ml_offer or is_ml_pending:
                     if time.monotonic() < retry_at.get(key, 0):
                         continue
@@ -276,6 +315,20 @@ def run_publisher(args, parser):
                                          not offer.get('name') or not valid_price(offer)
                                          or (require_photo and not (offer.get('api_image') or photo_path(offer))))))
                     if needs_public_data:
+                        can_try_ml, ml_state = ml_resilience.can_try(key)
+                        if not can_try_ml:
+                            reason = ml_state['reason']
+                            marker = ('ml_resiliencia', key, reason, ml_state.get('source_reason'))
+                            if marker not in announced:
+                                print(
+                                    'Leitura ML adiada pela resiliência:', key, '|', reason,
+                                    '| causa:', ml_state.get('source_reason'),
+                                    '| nova tentativa em', ml_state.get('retry_after'), 's'
+                                )
+                                announced.add(marker)
+                            metrics.record_offer(offer, 'AGUARDANDO', reason)
+                            continue
+                        ml_read_key = key
                         try:
                             ready = auto_reader.read(offer, blocking=args.simular)
                             if ready is None:
@@ -285,6 +338,7 @@ def run_publisher(args, parser):
                                     announced.add(marker)
                                 metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
                                 continue
+                            ml_resilience.success(ml_read_key)
                             offer = ready
                             offer.setdefault('auto_fetched_at', time.time())
                             key = offer.get('product_id')
@@ -306,11 +360,20 @@ def run_publisher(args, parser):
                                     retry_at[key] = time.monotonic() + 300
                                     continue
                         except AffiliateError as error:
-                            metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
-                            print('Leitura automática ML pendente:', key, '|', str(error))
-                            retry_at[key] = time.monotonic() + 300
+                            state = ml_resilience.failure(ml_read_key, error)
+                            metrics.record_offer(offer, 'AGUARDANDO', state['reason'])
+                            suffix = (
+                                ' | QUARENTENA' if state['quarantined'] else ''
+                            ) + (
+                                ' | CIRCUIT BREAKER ABERTO' if state['circuit_opened'] else ''
+                            )
+                            print(
+                                'Leitura automática ML pendente:', ml_read_key, '|', str(error),
+                                '| tentativa:', state['failures'],
+                                '| próxima em', state['retry_after'], 's' + suffix,
+                            )
                             continue
-                if not is_coupon and not is_mirror and not valid_price(offer):
+                if not is_coupon and not is_mirror and not is_amazon_offer and not valid_price(offer):
                     marker = ('sem_preco', key)
                     if marker not in announced:
                         print('Aguardando preço explícito ou edição na origem:', key)
@@ -356,6 +419,8 @@ def run_publisher(args, parser):
                             offer = ml_affiliate.prepare(offer)
                         elif offer.get('store') == 'KaBuM':
                             offer = kabum_affiliate.prepare(offer)
+                        elif offer.get('store') == 'Amazon':
+                            offer = amazon_affiliate.prepare(offer)
                         else:
                             offer = affiliate.prepare(offer)
                         if not is_mirror and not valid_price(offer):

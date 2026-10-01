@@ -60,6 +60,21 @@ class IntegrationTests(unittest.TestCase):
                 ['g2', 'g1', 'rec2', 'rec1', 'r1'],
             )
 
+    def test_ordered_rows_deduplicates_same_product_across_messages(self):
+        offers = [
+            dict(product_id='Shopee:1:1', source_date='2026-01-02',
+                 chat_id=1, message_id=2, price='90,00'),
+            dict(product_id='Shopee:1:1', source_date='2026-01-01',
+                 chat_id=2, message_id=3, price='100,00'),
+            dict(product_id='Shopee:1:2', source_date='2026-01-01',
+                 chat_id=1, message_id=4, price='80,00'),
+        ]
+        with patch.object(publisher, 'rows', return_value=iter(offers)):
+            rows = list(publisher.ordered_rows())
+        self.assertEqual([o['product_id'] for o in rows],
+                         ['Shopee:1:1', 'Shopee:1:2'])
+        self.assertEqual(rows[0]['price'], '90,00')
+
     def test_recovery_cooldown_does_not_block_eligible_radar(self):
         now = datetime.now(timezone.utc).isoformat()
         recovered = dict(

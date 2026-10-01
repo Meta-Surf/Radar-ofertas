@@ -132,7 +132,9 @@ Com `AWIN_PUBLISHER_ID` e `AWIN_ACCESS_TOKEN` configurados:
 - Link Builder gera tracking link quando o produto de grupo não consta no Product Feed;
 - Offers API consulta apenas ofertas ativas da KaBuM (`advertiserId=17729`, `membership=joined`, região BR);
 - vouchers só são associados quando a oferta oficial aponta diretamente para o mesmo produto;
-- Enhanced Feed fornece `availability`; `out_of_stock` bloqueia a candidata.
+- Enhanced Feed pode fornecer `availability`; `out_of_stock` bloqueia a candidata quando esse recurso existir para o anunciante.
+
+Na verificação de 01/10/2026, a conta Awin possui somente o feed KaBuM 46967; esse feed não contém coluna de estoque e o endpoint Enhanced retorna 404. Por isso, atualmente 100% dos produtos KaBuM ficam com estoque `DESCONHECIDO`. O sistema não transforma ausência de dado em confirmação de estoque.
 
 Sem essas credenciais, a produção pelo Product Feed continua funcionando normalmente e os recursos opcionais permanecem desligados.
 

@@ -17,6 +17,7 @@ URL_RE = re.compile(r'https?://[^\s<>]+')
 COUPON_RE = re.compile(r'\b(?:cupom|cupons|voucher)\b', re.I)
 CONDITION_RE = re.compile(r'R\$|\d\s*%|\b(?:OFF|selecionad\w*|categorias|acima|m[ií]nimo|v[aá]lid\w*|expira\w*|frete|primeira compra|c[oó]digo)\b', re.I)
 PROMO_RE = re.compile(r'whatsapp|telegram|\bgrupos?\b|https?://|www\.|@\w+', re.I)
+OTHER_STORE_RE = re.compile(r'\b(?:amazon|mercado\s*livre|mercadolivre|kabum|ka\s*bu\s*m)\b', re.I)
 
 def allowed(url, hosts):
     try:
@@ -97,7 +98,10 @@ def coupon_entries(messages):
             continue
         if not general_alert and url not in explicitly_labeled:
             continue
-        result.append({'url': url, 'conditions': contexts.get(url, '')})
+        context = contexts.get(url, '')
+        if allowed(url, REDIRECTORS) and OTHER_STORE_RE.search(context):
+            continue
+        result.append({'url': url, 'conditions': context})
     return result
 
 def alert_key(entries, source_date):
@@ -120,17 +124,26 @@ def prepare_alert(client, alert):
     if not isinstance(entries, list) or not 1 <= len(entries) <= 6:
         raise AffiliateError('Alerta de cupons inválido.')
     prepared = []
+    blocked = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get('conditions', ''), str):
             raise AffiliateError('Condições do cupom inválidas.')
-        destination = resolve_coupon(entry.get('url'))
-        if product(destination):
-            raise AffiliateError('Alerta bloqueado: um dos links é de produto, não de cupons.')
-        converted = client.generate_coupon_link(destination)
-        if converted == entry.get('url'):
-            raise AffiliateError('Cupom bloqueado: a API devolveu o link original do grupo.')
+        try:
+            destination = resolve_coupon(entry.get('url'))
+            if product(destination):
+                raise AffiliateError('Link resolvido é de produto, não de cupons.')
+            converted = client.generate_coupon_link(destination)
+            if converted == entry.get('url'):
+                raise AffiliateError('A API devolveu o link original do grupo.')
+        except AffiliateError as error:
+            blocked.append(str(error))
+            continue
         prepared.append(dict(url=destination, conditions=entry.get('conditions', ''),
                              affiliate_url=converted))
+    if not prepared:
+        raise AffiliateError(
+            'Cupom bloqueado: nenhum link de cupom Shopee pôde ser validado e convertido.'
+        )
     output = dict(alert, entries=prepared, affiliate_generated=True,
                   product_id=alert_key(prepared, alert['source_date']))
     if visible_length(alert_caption(output)) > 4096:

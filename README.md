@@ -17,7 +17,8 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 | Cupons Mercado Livre | Ativo; listas exclusivas usam arte própria e o Social configurado |
 | KaBuM | KaBuM 2.0 em produção via Awin: Product Feed, histórico, ranking, Link Builder, Offers API, cupons oficiais e publicação unificada no Telegram |
 | Gate pré-publicação | Ativo; revalida identidade, link, preço/validade quando há fonte confiável, deduplicação e estoque explícito antes do envio |
-| Amazon | Pendente |
+| Amazon | Integração Creators API implementada em modo fail-closed; aguarda Partner Tag e credenciais OAuth da conta de Associados |
+| Saúde operacional | `radar_health.py` verifica serviços, filas, backups, ML, estoque KaBuM e credenciais; alerta privado opcional |
 | Instagram e WhatsApp | Publicação multicanal pendente |
 
 O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
@@ -90,7 +91,8 @@ Principais grupos de configuração:
 - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;
-- KaBuM/Awin: `KABUM_AWIN_FEED_URL`, `AWIN_PUBLISHER_ID`, `AWIN_ACCESS_TOKEN` e demais opções descritas em [KABUM_AWIN.md](KABUM_AWIN.md).
+- KaBuM/Awin: `KABUM_AWIN_FEED_URL`, `AWIN_PUBLISHER_ID`, `AWIN_ACCESS_TOKEN` e demais opções descritas em [KABUM_AWIN.md](KABUM_AWIN.md);
+- Amazon: `AMAZON_PARTNER_TAG`, `AMAZON_CREATORS_CREDENTIAL_ID` e `AMAZON_CREATORS_CREDENTIAL_SECRET`, descritos em [AMAZON_CREATORS.md](AMAZON_CREATORS.md).
 
 ### Pausa temporária de fontes Telegram
 
@@ -117,7 +119,7 @@ O relatório mostra mensagens recebidas, captadas, publicadas, rejeitadas, aguar
 
 O radar contínuo lê `radar_categorias.json`, atualmente com 43 temas em 6 grupos. Os filtros mínimos, regras de título, marcas prioritárias, fila persistente e histórico estão documentados em [docs/radar-shopee.md](docs/radar-shopee.md).
 
-O publicador gera um novo link com as credenciais do projeto; falha de conversão bloqueia a publicação. Não há fallback para link de afiliado de terceiros.
+O publicador gera um novo link com as credenciais do projeto; falha de conversão bloqueia a publicação. Não há fallback para link de afiliado de terceiros. O histórico comparável usa janelas de 15 em 15 dias: 15, 30, 45, ..., 180.
 
 ## Mercado Livre
 
@@ -127,6 +129,8 @@ Há três fluxos distintos:
 - grupo manual: preserva o link que o operador já inseriu como seu próprio link;
 - listas exclusivas de cupons: usam a arte própria e o texto padrão do projeto.
 
+A leitura pública automática usa backoff persistente, quarentena por link e circuit breaker para sequências de HTTP 403, evitando martelar páginas que o Mercado Livre está bloqueando.
+
 Consulte [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md), [MERCADO_LIVRE_AUTOMATICO.md](MERCADO_LIVRE_AUTOMATICO.md) e [PUBLICADOR_MERCADO_LIVRE.md](PUBLICADOR_MERCADO_LIVRE.md).
 
 ## KaBuM / Awin
@@ -134,6 +138,10 @@ Consulte [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md), [MERCADO_LIVR
 `radar_kabum.py` participa do ciclo de produção. Ele atualiza o Product Feed, mantém histórico SQLite, detecta quedas comprovadas, usa Link Builder como fallback e consulta a Offers API. Produtos e cupons oficiais elegíveis entram na fila persistente e são enviados pelo publicador unificado, respeitando prioridade e deduplicação.
 
 Cupons genéricos KaBuM usam `cupons_kabum.py` e `assets/banner_cupons_kabum.png`. Consulte [KABUM_AWIN.md](KABUM_AWIN.md).
+
+## Amazon / Creators API
+
+`amazon_afiliados.py` implementa a API oficial atual da Amazon Brasil com OAuth 2.0. O produto é identificado por ASIN e, quando as credenciais estiverem configuradas, preço, disponibilidade, imagem, título e o link afiliado são obtidos da Creators API. Sem credenciais o fluxo permanece aguardando e não publica. Consulte [AMAZON_CREATORS.md](AMAZON_CREATORS.md).
 
 ## Recuperação e persistência
 
@@ -164,4 +172,5 @@ Trate o repositório como potencialmente público. Nunca versione `.env`, sessã
 - [Radar Shopee](docs/radar-shopee.md)
 - [Integração de grupos/cupons](INTEGRACAO.md)
 - [KaBuM/Awin](KABUM_AWIN.md)
+- [Amazon Creators API](AMAZON_CREATORS.md)
 - [Continuidade do projeto](CONTINUIDADE.md)

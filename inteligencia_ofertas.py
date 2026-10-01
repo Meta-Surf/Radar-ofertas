@@ -11,6 +11,7 @@ from functools import lru_cache
 
 DAY = 86400
 TTL = 2 * 3600
+HISTORY_WINDOWS = tuple(range(15, 181, 15))
 
 
 def normalized(value):
@@ -27,10 +28,14 @@ def cents(offer):
 
 
 def comparison_key(offer):
-    # KaBuM usa merchant_product_id estável do feed; não há variante inferida.
+    # KaBuM usa merchant_product_id e Amazon usa ASIN estável; não há variante inferida.
     if offer.get('store') == 'KaBuM' or offer.get('source') == 'kabum_feed':
         return hashlib.sha256(
             json.dumps([offer['product_id'], 'kabum_feed'], ensure_ascii=False).encode()
+        ).hexdigest()
+    if offer.get('store') == 'Amazon':
+        return hashlib.sha256(
+            json.dumps([offer['product_id'], 'amazon_asin'], ensure_ascii=False).encode()
         ).hexdigest()
     # Não presumir variante a partir de preço mínimo, título ou preço único.
     variant = offer.get('variant_id')
@@ -121,7 +126,7 @@ class Intelligence:
                                 (key, channel)).fetchone()[0]
         if first is None:
             return ''
-        for days in (180, 90, 60, 30):
+        for days in reversed(HISTORY_WINDOWS):
             if first > now - days * DAY:
                 continue
             minimum = self.db.execute('''SELECT MIN(cents) FROM price_history

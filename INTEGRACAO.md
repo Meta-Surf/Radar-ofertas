@@ -87,11 +87,11 @@ O monitor reprocessa por padrão mensagens recentes ao reiniciar. Álbuns e edi�
 
 `publicacoes.sqlite3` é compartilhado pelos fluxos integrados. Não apague o banco para forçar republicação.
 
-O histórico de preços pode acumular registros, mas selos de 30/60/90/180 dias exigem comparação válida e variante confirmada.
+O histórico de preços pode acumular registros, mas selos de 15/30/45/60/.../180 dias exigem comparação válida e variante confirmada.
 
 ## KaBuM
 
-KaBuM/Awin permanece fora do publicador integrado nesta etapa. `radar_kabum.py` está em modo diagnóstico e mantém seu próprio cache/histórico. Veja [KABUM_AWIN.md](KABUM_AWIN.md).
+KaBuM/Awin está integrado ao publicador: `radar_kabum.py` alimenta a fila, usa Product Feed/Offers/Link Builder e mantém cache/histórico. Cupons oficiais genéricos usam arte própria. Veja [KABUM_AWIN.md](KABUM_AWIN.md).
 
 ## Testes
 

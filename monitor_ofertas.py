@@ -184,7 +184,7 @@ async def mirror_product_candidates(messages, excluded=None):
     found, ignored = [], []
     for url in urls:
         resolved, reason = await resolve_for_capture(url)
-        if resolved and resolved[1] in ('Shopee', 'Mercado Livre', 'KaBuM'):
+        if resolved and resolved[1] in ('Shopee', 'Mercado Livre', 'KaBuM', 'Amazon'):
             key, store, direct_url = resolved
             found.append({
                 'source_url': url,
@@ -533,7 +533,7 @@ async def main():
             else:
                 key, store, direct_url = next(iter(products.values()))
                 kind = 'ml_offer' if store == 'Mercado Livre' else 'product_offer'
-            if store not in ('Shopee', 'Mercado Livre', 'KaBuM'):
+            if store not in ('Shopee', 'Mercado Livre', 'KaBuM', 'Amazon'):
                 mark_metric('REJEITADA', 'LOJA_NAO_SUPORTADA', store=store)
                 return
             image = None

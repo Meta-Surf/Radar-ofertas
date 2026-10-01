@@ -241,6 +241,44 @@ class GateTests(unittest.TestCase):
                 gate.validate(prepared, dict(prepared), "@canal")
         self.assertEqual(ctx.exception.reason, "CUPOM_INATIVO")
 
+    def amazon_offer(self, price="100,00"):
+        return {
+            "product_id": "Amazon:B012345678",
+            "store": "Amazon",
+            "url": "https://www.amazon.com.br/dp/B012345678",
+            "source": "telegram",
+            "source_date": datetime.now(timezone.utc).isoformat(),
+            "price": price,
+            "price_from": False,
+            "affiliate_generated": True,
+            "affiliate_url": "https://www.amazon.com.br/dp/B012345678?tag=minhatag-20",
+            "stock_confirmed": True,
+        }
+
+    def test_amazon_lower_api_price_updates(self):
+        amazon = SimpleNamespace(partner_tag="minhatag-20")
+        gate = PrePublicationGate(
+            self.base, self.db, kabum_affiliate=self.kabum,
+            amazon_affiliate=amazon,
+        )
+        original = self.amazon_offer("100,00")
+        prepared = self.amazon_offer("90,00")
+        result = gate.validate(original, prepared, "@canal")
+        self.assertEqual(result["price"], "90,00")
+        self.assertEqual(result["prepublication_validation"], "PRECO_ATUALIZADO_MENOR")
+
+    def test_amazon_price_increase_blocks(self):
+        amazon = SimpleNamespace(partner_tag="minhatag-20")
+        gate = PrePublicationGate(
+            self.base, self.db, kabum_affiliate=self.kabum,
+            amazon_affiliate=amazon,
+        )
+        original = self.amazon_offer("100,00")
+        prepared = self.amazon_offer("110,00")
+        with self.assertRaises(GateReject) as ctx:
+            gate.validate(original, prepared, "@canal")
+        self.assertEqual(ctx.exception.reason, "PRECO_AUMENTOU")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ A pontuação combina marca, premium, loja oficial quando disponível, avaliaç�
 
 ## Histórico
 
-Preços publicados confirmados podem ser registrados no histórico. Selos de 30/60/90/180 dias exigem comparação válida e variante confirmada. Não habilite `variant_verified` por inferência de título.
+Preços publicados confirmados podem ser registrados no histórico. Selos de 15/30/45/60/.../180 dias exigem comparação válida e variante confirmada. Não habilite `variant_verified` por inferência de título.
 
 ## Diagnóstico
 

@@ -74,12 +74,12 @@ class IntelligenceTests(unittest.TestCase):
         self.assertEqual(self.i.badge(offer(price='90,00'),'@outro',now),'')
 
     def test_all_windows_and_insufficient_history(self):
-        for days in (30,60,90,180):
+        for days in range(15,181,15):
             self.ledger.db.execute('DELETE FROM price_history')
             self.record(offer(), 1)
             self.record(offer(), days*DAY-1,2)
             self.assertIn(f'{days} dias', self.i.badge(offer(price='90,00'),'@canal',days*DAY+1))
-        self.assertEqual(self.i.badge(offer(price='90,00'),'@canal',29*DAY),'')
+        self.assertEqual(self.i.badge(offer(price='90,00'),'@canal',14*DAY),'')
 
     def test_ambiguous_variant_and_conditions_do_not_compare(self):
         for changes in ({'variant_verified':False},{'variant_id':None},{'price_from':True}):

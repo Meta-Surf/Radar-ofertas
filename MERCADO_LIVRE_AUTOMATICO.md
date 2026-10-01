@@ -60,3 +60,17 @@ retornou um arquivo inválido, impedindo validar a navegação real aqui. Portan
 não foi confirmado o destino, preço nem a imagem reais da câmera Intelbras. O
 resultado desse link ainda precisa ser verificado na rede do computador Windows.
 A automação não garante acesso a páginas que o Mercado Livre bloqueie também ali.
+
+## Resiliência 2.0
+
+A leitura automática usa `mercadolivre_resiliencia.py` para evitar tentativas repetidas contra páginas bloqueadas.
+
+- falhas são persistidas em `publicacoes.sqlite3`;
+- HTTP 403: backoff de 5 min, 15 min, 1 h e 6 h;
+- após 4 falhas 403 no mesmo link: quarentena de 24 h;
+- redirecionamento circular: quarentena após 3 falhas;
+- 5 links distintos com 403 em até 5 min abrem circuit breaker global de 15 min;
+- uma leitura bem-sucedida limpa a falha daquele link;
+- o estado sobrevive a reinícios do publicador.
+
+A resiliência não tenta contornar 403, CAPTCHA ou controles de acesso. Ela reduz carga e mantém a oferta pendente até uma nova tentativa segura.
