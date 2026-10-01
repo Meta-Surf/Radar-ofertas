@@ -1,10 +1,11 @@
-# Operação atual — 30/09/2026
+# Operação atual — 01/10/2026
 
 Este é o guia principal para colocar o Radar de Ofertas em execução. Documentos datados de correções anteriores permanecem apenas como histórico.
 
 ## Requisitos
 
-- Windows com Python 3.11+;
+- VPS Linux para a produção atual ou Windows para execução local;
+- Python 3.11+ (a VPS atual usa Python 3.12);
 - dependências de `requirements.txt`;
 - credenciais locais em `.env`;
 - sessão Telegram autorizada;
@@ -17,7 +18,25 @@ py -m pip install -r requirements.txt
 py -m playwright install chromium
 ```
 
-## Início integrado
+## Produção atual — VPS Linux
+
+A instância de produção fica em `/opt/radar` e usa serviços `systemd` separados:
+
+```bash
+systemctl status radar-monitor.service
+systemctl status radar-publicador.service
+systemctl status radar-shopee.service
+```
+
+Logs do monitor:
+
+```bash
+journalctl -u radar-monitor.service -n 100 --no-pager
+```
+
+Ao alterar somente fontes Telegram, reinicie apenas `radar-monitor.service`; o publicador e o Radar Shopee não precisam ser interrompidos.
+
+## Início integrado local — Windows
 
 Execute apenas uma vez:
 
@@ -63,6 +82,18 @@ IDADE_MAXIMA_RECUPERADAS_MINUTOS=45
 ```
 
 A recuperação reconstrói álbuns, considera edições e usa digest para evitar gravar a mesma revisão repetidamente. O banco de publicações continua sendo a barreira final contra duplicação.
+
+## Pausar grupos/canais sem apagar a configuração
+
+`TG_CHATS` continua sendo o cadastro das fontes. Para suspender temporariamente uma origem, mantenha-a em `TG_CHATS` e adicione seu ID numérico ou `@username` a:
+
+```env
+TG_PAUSED_CHATS=
+```
+
+A pausa tem precedência sobre captura normal, mídia, modo espelho e rebranding. Assim, histórico e configuração permanecem disponíveis para reativação futura. Para reativar uma fonte, retire apenas o valor de `TG_PAUSED_CHATS` e reinicie o monitor.
+
+No diagnóstico de uma mensagem, o monitor exibe `Pausado: True` quando a origem estiver suspensa.
 
 ## Canal especial em modo espelho
 

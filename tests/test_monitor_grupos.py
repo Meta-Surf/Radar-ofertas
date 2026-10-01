@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 import requests
 from ofertas_core import price_info, coupon_page_links, extract_links, caption
 from cupons_shopee import coupon_entries
-from monitor_ofertas import CaptureRevisions, resolve_for_capture
+from monitor_ofertas import (CaptureRevisions, configured_chat_values,
+                             dialog_is_configured, resolve_for_capture)
 
 EXAMPLE = '''🔥 Kit Ventoinha Pichau Ventus NX, ARGB, 5x120mm, Branco, PCH-VTNX5-WH01
 
@@ -35,6 +36,17 @@ def message(text=EXAMPLE, identity=123):
 
 
 class GroupMonitoringTests(unittest.TestCase):
+    def test_paused_chat_matches_numeric_id_and_username_case_insensitively(self):
+        dialog = SimpleNamespace(id=-1001234567890,
+                                 entity=SimpleNamespace(username='CanalTeste'))
+        with patch.dict('os.environ', {
+            'TG_PAUSED_CHATS': '-1001234567890,@OUTROCANAL'
+        }):
+            paused = configured_chat_values('TG_PAUSED_CHATS')
+        self.assertTrue(dialog_is_configured(dialog, paused))
+        self.assertTrue(dialog_is_configured(dialog, {'@canalteste'}))
+        self.assertFalse(dialog_is_configured(dialog, {'-1009999999999'}))
+
     def test_actual_offer_price_condition_and_separate_coupon(self):
         msg = message()
         info = price_info(EXAMPLE)
@@ -120,6 +132,51 @@ class GroupMonitoringTests(unittest.TestCase):
             self.assertEqual(resolve.call_count, 3)
 
 class CaptureFlowTests(unittest.TestCase):
+    def test_paused_chat_is_not_registered_in_live_handlers(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        import monitor_ofertas as monitor
+
+        registered = []
+        paused_entity = SimpleNamespace(username='pausado')
+        active_entity = SimpleNamespace(username='ativo')
+        client = Mock()
+        client.start = AsyncMock()
+        client.disconnect = AsyncMock()
+        client.run_until_disconnected = AsyncMock()
+
+        async def dialogs():
+            yield SimpleNamespace(id=-123, name='Pausado', entity=paused_entity,
+                                  is_group=False, is_channel=True)
+            yield SimpleNamespace(id=-456, name='Ativo', entity=active_entity,
+                                  is_group=False, is_channel=True)
+        client.iter_dialogs = dialogs
+
+        def on(event_type):
+            registered.append(list(getattr(event_type, 'chats', []) or []))
+            return lambda fn: fn
+        client.on = on
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(monitor, 'BASE', Path(directory)), \
+             patch.object(monitor, 'TelegramClient', return_value=client), \
+             patch('sys.argv', ['monitor_ofertas.py']), \
+             patch.dict('os.environ', {
+                 'TG_API_ID': '123', 'TG_API_HASH': 'fake',
+                 'TG_CHATS': '-123,-456', 'TG_PAUSED_CHATS': '-123',
+                 'TG_MEDIA_CHATS': '-123,-456', 'TG_ESPELHO_CHATS': '',
+                 'TG_REBRAND_CHATS': '', 'TELEGRAM_CANAL': '@destino',
+                 'TG_RECUPERAR_MINUTOS': '0', 'ML_MANUAL_CHAT': '',
+             }), \
+             patch('builtins.print'):
+            asyncio.run(monitor.main())
+
+        self.assertEqual(len(registered), 3)
+        for chats in registered:
+            self.assertIn(-456, chats)
+            self.assertNotIn(-123, chats)
+
     def test_real_capture_skips_coupon_resolver_and_identical_edit(self):
         import json
         import tempfile
@@ -259,4 +316,3 @@ class CaptureFlowTests(unittest.TestCase):
                 monitor.queued_revision_digests(path),
                 {('-123', 7): 'new'},
             )
-

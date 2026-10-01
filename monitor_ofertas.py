@@ -58,6 +58,24 @@ def bounded_env_int(name, default, minimum, maximum):
     return max(minimum, min(maximum, value))
 
 
+def configured_chat_values(name):
+    """Valores de chat configurados no .env, normalizados para comparação."""
+    return {x.strip().lower() for x in os.getenv(name, '').split(',') if x.strip()}
+
+
+def dialog_config_keys(dialog):
+    """Chaves estáveis aceitas na configuração: ID numérico e @username."""
+    keys = {str(dialog.id).lower()}
+    username = str(getattr(dialog.entity, 'username', '') or '').strip().lower()
+    if username:
+        keys.add('@' + username)
+    return keys
+
+
+def dialog_is_configured(dialog, configured):
+    return bool(dialog_config_keys(dialog) & set(configured))
+
+
 def exclusive_coupon_message(text, messages, shopee_alerts=None, ml_alert=None):
     """Só cria publicação própria de cupom quando a mensagem é dedicada a cupons.
 
@@ -193,6 +211,8 @@ async def main():
     await client.start()
     try:
         dialogs = [d async for d in client.iter_dialogs() if d.is_group or d.is_channel]
+        paused_requested = configured_chat_values('TG_PAUSED_CHATS')
+        paused_chat_ids = {d.id for d in dialogs if dialog_is_configured(d, paused_requested)}
         if args.listar:
             for d in dialogs:
                 print(d.id, d.name)
@@ -220,11 +240,14 @@ async def main():
                 missing.append(value)
                 print('Chat configurado não encontrado; ignorando e mantendo os demais:', value)
                 continue
+            if dialog_is_configured(match, paused_requested):
+                print('Chat pausado pela configuração; ignorando:', match.id, match.name)
+                continue
             if str(match.id) == os.getenv('TELEGRAM_CANAL', '') or ('@' + str(getattr(match.entity, 'username', '')).lower()) == os.getenv('TELEGRAM_CANAL', '').lower():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
             selected_dialogs[match.id] = match
-            if value in mirror_requested:
+            if dialog_is_configured(match, {x.lower() for x in mirror_requested}):
                 mirror_chat_ids.add(match.id)
         if not selected:
             parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
@@ -234,6 +257,7 @@ async def main():
         allowed_media.update(image_branding.configured_chats())
         if ml_manual.chat_id():
             allowed_media.add(ml_manual.chat_id())
+        allowed_media.difference_update(str(chat_id) for chat_id in paused_chat_ids)
 
         requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 30, 0, 1440)
         publisher_max_age = bounded_env_int('IDADE_MAXIMA_MINUTOS', 120, 1, 1440)
@@ -251,9 +275,10 @@ async def main():
                 parser.error('Canal não encontrado entre os chats da sua conta.')
             print('Canal:', dialog.name, '| ID:', dialog.id)
             print('Está em TG_CHATS:', dialog.id in selected)
+            print('Pausado:', dialog.id in paused_chat_ids)
             print('Imagens autorizadas em TG_MEDIA_CHATS:', str(dialog.id) in allowed_media)
             print('Modo espelho:', dialog.id in mirror_chat_ids)
-            print('Rebranding visual:', image_branding.enabled(dialog.id))
+            print('Rebranding visual:', dialog.id not in paused_chat_ids and image_branding.enabled(dialog.id))
             message = await client.get_messages(dialog.entity, ids=int(match[2]))
             if not message:
                 print('Mensagem não encontrada ou indisponível para sua conta.')

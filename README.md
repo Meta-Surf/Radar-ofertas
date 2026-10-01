@@ -4,7 +4,7 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 
 > Imagens de canais específicos podem usar **rebranding visual** configurado por `TG_REBRAND_CHATS`: o monitor cobre banner e selo de preço da origem antes de publicar. Consulte `docs/operacao.md`.
 
-## Estado atual — 30/09/2026
+## Estado atual — 01/10/2026
 
 | Componente | Estado |
 |---|---|
@@ -63,16 +63,32 @@ py -u bot_ofertas_revisao.py
 
 Não execute outra instância do mesmo monitor, radar ou publicador em paralelo.
 
+### Produção atual na VPS Linux
+
+Na produção, o projeto fica em `/opt/radar` e os componentes principais são gerenciados pelo `systemd`:
+
+- `radar-monitor.service` — captura Telegram;
+- `radar-publicador.service` — publicação unificada;
+- `radar-shopee.service` — radar contínuo Shopee.
+
+O fluxo `.bat` continua documentado para execução local em Windows, mas não é o gerenciador da instância de produção.
+
 ## Configuração
 
 Copie `.env.example` para `.env` apenas em uma instalação nova. Em instalações existentes, preserve o `.env` atual.
 
 Principais grupos de configuração:
 
-- Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_ESPELHO_CHATS`;
+- Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;
 - KaBuM/Awin: `KABUM_AWIN_FEED_URL` e opções de seleção/cache descritas em [KABUM_AWIN.md](KABUM_AWIN.md).
+
+### Pausa temporária de fontes Telegram
+
+Mantenha a fonte cadastrada em `TG_CHATS` e, quando quiser suspendê-la sem perder a configuração, adicione seu ID ou `@username` a `TG_PAUSED_CHATS`. A pausa prevalece sobre mídia, modo espelho e rebranding. O comando `--diagnosticar` informa `Pausado: True` quando a origem está suspensa.
+
+Para reativar, remova somente a origem de `TG_PAUSED_CHATS` e reinicie o monitor.
 
 ## Shopee
 
