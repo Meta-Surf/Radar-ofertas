@@ -218,6 +218,7 @@ def banner_path(base):
 def send_alert(token, channel, alert, image=None):
     import requests
     from shopee_afiliados import AffiliateError, valid_affiliate_url
+    from telegram_api import send_telegram
     entries = alert.get('entries', [])
     if not alert.get('affiliate_generated') or not entries or any(not valid_affiliate_url(e.get('affiliate_url')) for e in entries):
         raise AffiliateError('Alerta bloqueado: faltam links gerados pela API.')
@@ -226,18 +227,8 @@ def send_alert(token, channel, alert, image=None):
     image = image if visible_length(text) <= 1024 else None
     data = {'chat_id': channel, 'parse_mode': 'HTML',
             'caption' if image else 'text': text}
-    method = 'sendPhoto' if image else 'sendMessage'
-    endpoint = f'https://api.telegram.org/bot{token}/{method}'
-    if image:
-        with image.open('rb') as photo:
-            response = requests.post(endpoint, data=data, files={'photo': (image.name, photo)}, timeout=(10, 45))
-    else:
-        data['link_preview_options'] = json.dumps({'is_disabled': True})
-        response = requests.post(endpoint, data=data, timeout=(10, 45))
-    result = response.json()
-    if result.get('ok') is False:
-        return None, int(result.get('parameters', {}).get('retry_after', 60))
-    return int(result['result']['message_id']), 0
+    message_id = send_telegram(requests, token, data, image=image)
+    return message_id, 0
 
 def main():
     import argparse

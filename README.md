@@ -38,6 +38,12 @@ As ofertas captadas não aguardam os 20 minutos do radar. Mensagens de produto q
 
 A validação forte é usada no Radar Shopee (API), Mercado Livre automático (leitura pública), KaBuM (feed recente) e cupons KaBuM (Offers API). Ofertas de grupo Shopee com preço final condicionado a cupom/Pix não têm esse valor final exposto pela API; por isso só usam preço da origem por até 5 minutos, com identidade/link revalidados, sem afirmar uma confirmação de preço inexistente.
 
+## Resiliência de envio Telegram
+
+`telegram_api.py` classifica as respostas da Bot API antes de decidir o efeito na fila. Erros permanentes 4xx de uma publicação são rejeitados sem pausar as demais; `429` respeita `retry_after` e pausa globalmente; erros 5xx conhecidos aguardam nova tentativa apenas daquele item; `401/403/404` são tratados como falha de configuração e aplicam backoff global. Falha de rede ou resposta cujo resultado não possa ser comprovado vira `uncertain`, preservando a proteção contra duplicação.
+
+Se o Telegram rejeitar especificamente a mídia de um `sendPhoto` com erro 400 de foto/imagem/arquivo, o publicador tenta uma única vez como `sendMessage`, sem imagem. Outros 400 — como HTML inválido — não recebem retry cego.
+
 ## Canal especial
 
 O modo espelho é ativado por `TG_ESPELHO_CHATS`. A configuração validada em produção usa a ID numérica do Telegram:

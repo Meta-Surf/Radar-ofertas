@@ -134,12 +134,24 @@ class MLCouponTests(unittest.TestCase):
             ledger.db.close()
 
     def test_retry_and_uncertain_response_are_not_duplicate_sends(self):
-        response = Mock(); response.json.return_value = {'ok': False, 'parameters': {'retry_after': 90}}
+        from telegram_api import TelegramSendError
+        response = Mock(status_code=429)
+        response.json.return_value = {
+            'ok': False, 'error_code': 429,
+            'description': 'Too Many Requests',
+            'parameters': {'retry_after': 90},
+        }
         with patch('requests.post', return_value=response) as post:
-            self.assertEqual(ml.send_alert('fake', '@fake', build()), (None, 90))
+            with self.assertRaises(TelegramSendError) as ctx:
+                ml.send_alert('fake', '@fake', build())
+            self.assertEqual(ctx.exception.kind, 'rate_limit')
+            self.assertEqual(ctx.exception.retry_after, 90)
             post.assert_called_once()
+
+        response = Mock(status_code=200)
         response.json.side_effect = ValueError('unexpected')
         with patch('requests.post', return_value=response) as post:
-            with self.assertRaises(ValueError):
+            with self.assertRaises(TelegramSendError) as ctx:
                 ml.send_alert('fake', '@fake', build())
+            self.assertEqual(ctx.exception.kind, 'uncertain')
             post.assert_called_once()

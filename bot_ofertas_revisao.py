@@ -21,6 +21,7 @@ import canal_espelho as mirror
 from metricas_fontes import SourceMetrics
 from prepublicacao import PrePublicationGate, GateReject
 from mercadolivre_resiliencia import MLResilience
+from telegram_api import TelegramSendError, send_telegram
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -107,7 +108,6 @@ def send(token, channel, offer, image):
                 if is_mirror else caption(offer))
     if mirror.visible_length(rendered) > 1024:
         image = None
-    method = 'sendPhoto' if image else 'sendMessage'
     data = {'chat_id': channel, 'parse_mode': 'HTML'}
     if is_mirror:
         button = str(offer.get('mirror_button_text') or '').strip()
@@ -120,20 +120,10 @@ def send(token, channel, offer, image):
             'inline_keyboard': [[{'text': '🛒 VER OFERTA', 'url': offer['affiliate_url']}]]
         })
     data['caption' if image else 'text'] = rendered
-    endpoint = f'https://api.telegram.org/bot{token}/{method}'
-    if isinstance(image, str):
-        data['photo'] = image
-        response = requests.post(endpoint, data=data, timeout=(10, 45))
-    elif image:
-        with image.open('rb') as f:
-            response = requests.post(endpoint, data=data, files={'photo': (image.name, f, 'image/jpeg')}, timeout=(10, 45))
-    else:
-        data['link_preview_options'] = json.dumps({'is_disabled': True})
-        response = requests.post(endpoint, data=data, timeout=(10, 45))
-    result = response.json()
-    if result.get('ok') is False:
-        return None, int(result.get('parameters', {}).get('retry_after', 60))
-    return int(result['result']['message_id']), 0
+    message_id = send_telegram(
+        requests, token, data, image=image, image_mime='image/jpeg'
+    )
+    return message_id, 0
 
 def valid_price(offer):
     value = offer.get('price')
@@ -520,19 +510,47 @@ def run_publisher(args, parser):
                         ledger.mark_attempt(interval, clock_id=2)
                     elif is_recovered:
                         ledger.mark_attempt(recovery_interval, clock_id=4)
-                    message_id, wait = sender(token, channel, offer, image)
+                    message_id, _ = sender(token, channel, offer, image)
+                except TelegramSendError as error:
+                    if error.kind == 'uncertain':
+                        ledger.mark_uncertain(key, day)
+                        metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
+                        print('Resposta Telegram incerta. Reserva marcada como uncertain:', key)
+                        break
+
+                    ledger.release(key, day)
+                    if error.kind == 'permanent':
+                        metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX')
+                        gate_blocked[source_key] = revision
+                        if origin == 'radar':
+                            intelligence.discard(key)
+                        print('Telegram rejeitou permanentemente a oferta:', key,
+                              '| HTTP/API', error.error_code, '|', error.description)
+                        continue
+
+                    retry = max(error.retry_after, 1)
+                    retry_at[key] = time.monotonic() + retry
+                    if error.kind == 'rate_limit':
+                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_429')
+                        ledger.mark_attempt(retry, clock_id=3)
+                        print('Telegram aplicou rate limit; fila pausada por', retry, 's.')
+                        break
+                    if error.kind == 'configuration':
+                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_CONFIG')
+                        ledger.mark_attempt(retry, clock_id=3)
+                        print('Telegram recusou a configuração do bot/canal; nova tentativa em',
+                              retry, 's | código', error.error_code)
+                        break
+
+                    metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_TRANSITORIO')
+                    print('Falha transitória do Telegram:', key, '| código',
+                          error.error_code, '| nova tentativa em', retry, 's.')
+                    continue
                 except Exception:
                     ledger.mark_uncertain(key, day)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
-                    break
-                if message_id is None:
-                    ledger.release(key, day)
-                    metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_REJEITOU')
-                    print('Telegram rejeitou a publicação:', key, '| aguardando para tentar novamente.')
-                    retry_at[key] = time.monotonic() + max(wait, 1)
-                    ledger.mark_attempt(max(wait, 1), clock_id=3)
                     break
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
                 if offer.get('source') == 'kabum_awin_coupon':

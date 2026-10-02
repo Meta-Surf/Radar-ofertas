@@ -46,6 +46,117 @@ class IntegrationTests(unittest.TestCase):
             finally:
                 ledger.db.close()
 
+    def test_permanent_telegram_400_does_not_pause_next_offer(self):
+        from telegram_api import TelegramSendError
+
+        def offer(item):
+            return dict(
+                product_id=f'Shopee:1:{item}',
+                url=f'https://shopee.com.br/product/1/{item}',
+                price='99,90',
+                source='telegram',
+                source_date=datetime.now(timezone.utc).isoformat(),
+                api_image='https://x.susercontent.com/a.jpg',
+            )
+
+        first, second = offer(11), offer(12)
+        client = Mock()
+        client.prepare.side_effect = lambda o: dict(
+            o, store='Shopee',
+            affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            send_error = TelegramSendError(
+                'permanent', "Bad Request: can't parse entities", error_code=400
+            )
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                 patch.object(publisher, 'rows', return_value=iter([first, second])), \
+                 patch.object(publisher, 'send', side_effect=[send_error, (321, 0)]) as send, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+            self.assertEqual(send.call_count, 2)
+            self.assertEqual(
+                ledger.db.execute("SELECT COUNT(*) FROM posts WHERE status='sent'").fetchone()[0],
+                1,
+            )
+            self.assertEqual(ledger.publication_delay(clock_id=3), 0)
+            ledger.db.close()
+
+    def test_transient_telegram_5xx_does_not_pause_next_offer(self):
+        from telegram_api import TelegramSendError
+
+        def offer(item):
+            return dict(
+                product_id=f'Shopee:2:{item}',
+                url=f'https://shopee.com.br/product/2/{item}',
+                price='99,90', source='telegram',
+                source_date=datetime.now(timezone.utc).isoformat(),
+                api_image='https://x.susercontent.com/a.jpg',
+            )
+
+        first, second = offer(21), offer(22)
+        client = Mock()
+        client.prepare.side_effect = lambda o: dict(
+            o, store='Shopee', affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            error = TelegramSendError(
+                'transient', 'Bad Gateway', error_code=502, retry_after=30
+            )
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                 patch.object(publisher, 'rows', return_value=iter([first, second])), \
+                 patch.object(publisher, 'send', side_effect=[error, (322, 0)]) as send, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+            self.assertEqual(send.call_count, 2)
+            self.assertEqual(ledger.publication_delay(clock_id=3), 0)
+            ledger.db.close()
+
+    def test_telegram_429_pauses_global_queue(self):
+        from telegram_api import TelegramSendError
+
+        offer = dict(
+            product_id='Shopee:3:31',
+            url='https://shopee.com.br/product/3/31',
+            price='99,90', source='telegram',
+            source_date=datetime.now(timezone.utc).isoformat(),
+            api_image='https://x.susercontent.com/a.jpg',
+        )
+        client = Mock()
+        client.prepare.return_value = dict(
+            offer, store='Shopee', affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            error = TelegramSendError(
+                'rate_limit', 'Too Many Requests', error_code=429, retry_after=90
+            )
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                 patch.object(publisher, 'rows', return_value=iter([offer])), \
+                 patch.object(publisher, 'send', side_effect=error) as send, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+            send.assert_called_once()
+            self.assertGreater(ledger.publication_delay(clock_id=3), 0)
+            ledger.db.close()
+
     def test_live_then_recovered_then_radar_order(self):
         offers = [
             dict(product_id='g1', source_date='2026-01-01'),

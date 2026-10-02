@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from kabum_afiliados import valid_affiliate_url
+from telegram_api import send_telegram
 from ofertas_core import product
 from shopee_afiliados import AffiliateError
 
@@ -195,24 +196,12 @@ def send_alert(token, channel, alert, image=None):
         raise AffiliateError("Cupom KaBuM excede o limite do Telegram.")
     if visible_length(text) > 1024:
         image = None
-    method = "sendPhoto" if image else "sendMessage"
     data = {
         "chat_id": channel,
         "parse_mode": "HTML",
         "caption" if image else "text": text,
     }
-    endpoint = f"https://api.telegram.org/bot{token}/{method}"
-    if image:
-        with Path(image).open("rb") as photo:
-            response = requests.post(
-                endpoint, data=data,
-                files={"photo": (Path(image).name, photo, "image/png")},
-                timeout=(10, 45),
-            )
-    else:
-        data["link_preview_options"] = json.dumps({"is_disabled": True})
-        response = requests.post(endpoint, data=data, timeout=(10, 45))
-    result = response.json()
-    if result.get("ok") is False:
-        return None, int(result.get("parameters", {}).get("retry_after", 60))
-    return int(result["result"]["message_id"]), 0
+    message_id = send_telegram(
+        requests, token, data, image=image, image_mime="image/png"
+    )
+    return message_id, 0

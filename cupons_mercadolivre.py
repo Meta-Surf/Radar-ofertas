@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import requests
 from shopee_afiliados import AffiliateError
+from telegram_api import send_telegram
 
 # Inclui links sem protocolo, Markdown, HTML e convites/usuários de grupos.
 LINK = re.compile(r'(?i)(?:https?://|www\.)[^\s<>]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>]*)?|@\w+')
@@ -156,16 +157,6 @@ def send_alert(token, channel, alert, image=None):
     text = alert_caption(alert)
     if visible_length(text) > 1024:
         image = None
-    method = 'sendPhoto' if image else 'sendMessage'
     data = {'chat_id': channel, 'parse_mode': 'HTML', 'caption' if image else 'text': text}
-    endpoint = f'https://api.telegram.org/bot{token}/{method}'
-    if image:
-        with image.open('rb') as photo:
-            response = requests.post(endpoint, data=data, files={'photo': (image.name, photo)}, timeout=(10, 45))
-    else:
-        data['link_preview_options'] = json.dumps({'is_disabled': True})
-        response = requests.post(endpoint, data=data, timeout=(10, 45))
-    result = response.json()
-    if result.get('ok') is False:
-        return None, int(result.get('parameters', {}).get('retry_after', 60))
-    return int(result['result']['message_id']), 0
+    message_id = send_telegram(requests, token, data, image=image)
+    return message_id, 0
