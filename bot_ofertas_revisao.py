@@ -22,6 +22,7 @@ from metricas_fontes import SourceMetrics
 from prepublicacao import PrePublicationGate, GateReject
 from mercadolivre_resiliencia import MLResilience
 from telegram_api import TelegramSendError, send_telegram
+from publisher_backoff import PublisherBackoff, offer_revision
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -197,10 +198,11 @@ def run_publisher(args, parser):
                 reservation_recovery['uncertain_total'], 'uncertain no total.',
             )
     metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
+    backoff = PublisherBackoff(ledger.db, enabled=not args.simular)
+    backoff.prune()
     from inteligencia_ofertas import Intelligence
     intelligence = Intelligence(ledger.db)
     announced = set()
-    retry_at = {}
     prepared_coupons = {}
     gate_blocked = {}
     from mercadolivre_auto import AutoReader
@@ -223,10 +225,14 @@ def run_publisher(args, parser):
                 key = offer.get('product_id')
                 source_key = key
                 revision = json.dumps(offer, sort_keys=True, ensure_ascii=False, default=str)
+                revision_id = offer_revision(offer)
                 if source_key in gate_blocked:
                     if gate_blocked[source_key] == revision:
                         continue
                     del gate_blocked[source_key]
+                if (not args.simular and isinstance(source_key, str)
+                        and backoff.remaining(source_key, revision_id) > 0):
+                    continue
                 original_offer = dict(offer)
                 is_coupon = offer.get('kind') == 'coupon_alert'
                 is_ml_coupon = is_coupon and offer.get('store') == 'Mercado Livre'
@@ -238,38 +244,45 @@ def run_publisher(args, parser):
                 is_amazon_offer = offer.get('store') == 'Amazon'
                 is_mirror = offer.get('publish_mode') == 'mirror'
                 is_recovered = bool(offer.get('recovered')) and offer.get('source') != 'shopee_api'
+                if not isinstance(key, str):
+                    continue
                 if (is_ml_offer or is_ml_pending) and ml_affiliate is None:
                     marker = ('ml_afiliado_indisponivel', key)
                     if marker not in announced:
                         print('Oferta Mercado Livre captada, mas o gerador de afiliado está indisponível:', key)
                         announced.add(marker)
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    gate_blocked[source_key] = revision
                     continue
                 if is_kabum_offer and kabum_affiliate is None:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    gate_blocked[source_key] = revision
                     continue
                 if is_amazon_offer and amazon_affiliate is None:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    gate_blocked[source_key] = revision
                     continue
                 if not (is_ml_offer or is_ml_pending or is_kabum_offer or is_amazon_offer) and affiliate is None and not is_ml_coupon and not is_ml_manual:
                     metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
-                    continue
-                if not isinstance(key, str):
+                    gate_blocked[source_key] = revision
                     continue
                 if is_ml_manual:
                     if not ml_manual.trusted(offer.get('chat_id')):
                         metrics.record_offer(offer, 'REJEITADA', 'ORIGEM_NAO_AUTORIZADA')
+                        gate_blocked[source_key] = revision
                         continue
                 elif is_ml_pending:
                     if (not ml_manual.allowed_link(offer.get('url'))
                             or offer.get('product_id') != ml_manual.pending_key(offer['url'])):
                         metrics.record_offer(offer, 'REJEITADA', 'LINK_INVALIDO')
+                        gate_blocked[source_key] = revision
                         continue
                     offer['store'] = 'Mercado Livre'
                 elif not is_coupon:
                     checked = product(offer.get('url', ''))
                     if not checked or checked[0] != key or checked[2] != offer['url']:
                         metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
+                        gate_blocked[source_key] = revision
                         continue
                     offer['store'] = checked[1]
                     if checked[1] not in ('Shopee', 'Mercado Livre', 'KaBuM', 'Amazon'):
@@ -277,18 +290,22 @@ def run_publisher(args, parser):
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
                         metrics.record_offer(offer, 'AGUARDANDO', 'LOJA_NAO_INTEGRADA')
+                        gate_blocked[source_key] = revision
                         continue
                     if checked[1] == 'Mercado Livre' and not is_ml_offer:
                         metrics.record_offer(offer, 'REJEITADA', 'FLUXO_ML_INVALIDO')
+                        gate_blocked[source_key] = revision
                         continue
                 try:
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
                 except (KeyError, TypeError, ValueError):
                     metrics.record_offer(offer, 'REJEITADA', 'DATA_INVALIDA')
+                    gate_blocked[source_key] = revision
                     continue
                 allowed_age = min(max_age, recovery_max_age) if is_recovered else max_age
                 if age < -60 or age > allowed_age * 60:
                     metrics.record_offer(offer, 'REJEITADA', 'EXPIRADA')
+                    gate_blocked[source_key] = revision
                     continue
 
                 # Evita gastar API/navegador com itens que o ledger já bloquearia.
@@ -306,8 +323,6 @@ def run_publisher(args, parser):
                         continue
 
                 if is_ml_manual or is_ml_offer or is_ml_pending:
-                    if time.monotonic() < retry_at.get(key, 0):
-                        continue
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
                         continue
@@ -348,16 +363,24 @@ def run_publisher(args, parser):
                                 continue
                             if is_ml_pending:
                                 metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
-                                print('Leitura automática ML ainda não normalizou o produto:', key)
-                                retry_at[key] = time.monotonic() + 300
+                                state = backoff.failure(
+                                    source_key, revision_id, 'LEITURA_ML', base=300
+                                )
+                                print('Leitura automática ML ainda não normalizou o produto:', key,
+                                      '| tentativa:', state['failures'],
+                                      '| próxima em', state['delay'], 's')
                                 continue
                             if is_ml_offer:
                                 checked = product(offer.get('url', ''))
                                 if (not checked or checked[0] != key or checked[1] != 'Mercado Livre'
                                         or checked[2] != offer['url']):
                                     metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
-                                    print('Leitura ML retornou produto inconsistente; publicação bloqueada:', key)
-                                    retry_at[key] = time.monotonic() + 300
+                                    state = backoff.failure(
+                                        source_key, revision_id, 'PRODUTO_INCONSISTENTE', base=300
+                                    )
+                                    print('Leitura ML retornou produto inconsistente; nova validação adiada:', key,
+                                          '| tentativa:', state['failures'],
+                                          '| próxima em', state['delay'], 's')
                                     continue
                         except AffiliateError as error:
                             state = ml_resilience.failure(ml_read_key, error)
@@ -379,8 +402,7 @@ def run_publisher(args, parser):
                         print('Aguardando preço explícito ou edição na origem:', key)
                         announced.add(marker)
                     metrics.record_offer(offer, 'AGUARDANDO', 'PRECO_AUSENTE')
-                    continue
-                if time.monotonic() < retry_at.get(key, 0):
+                    gate_blocked[source_key] = revision
                     continue
                 if args.simular and key in announced:
                     continue
@@ -397,11 +419,13 @@ def run_publisher(args, parser):
                         offer = prepared_coupons[raw_key]
                         key = offer['product_id']
                     except AffiliateError as error:
-                        metrics.record_offer(offer, 'AGUARDANDO', metric_reason_from_error(error))
-                        print(str(error))
-                        retry_at[raw_key] = time.monotonic() + 300
+                        reason = metric_reason_from_error(error)
+                        metrics.record_offer(offer, 'AGUARDANDO', reason)
+                        state = backoff.failure(raw_key, revision_id, reason, base=300)
+                        print(str(error), '| tentativa:', state['failures'],
+                              '| próxima em', state['delay'], 's')
                         continue
-                    if time.monotonic() < retry_at.get(key, 0) or (args.simular and key in announced):
+                    if args.simular and key in announced:
                         continue
                 origin = ('radar' if offer.get('source') in ('shopee_api', 'kabum_feed', 'kabum_awin_coupon')
                           else ('recuperada' if is_recovered else 'telegram'))
@@ -437,7 +461,10 @@ def run_publisher(args, parser):
                     print(str(e))
                     if origin == 'radar':
                         intelligence.discard(key)
-                    retry_at[key] = time.monotonic() + 300
+                    reason = metric_reason_from_error(e)
+                    state = backoff.failure(source_key, revision_id, reason, base=300)
+                    print('Retentativa adiada:', source_key, '| tentativa:',
+                          state['failures'], '| próxima em', state['delay'], 's')
                     continue
 
                 try:
@@ -452,7 +479,12 @@ def run_publisher(args, parser):
                         if origin == 'radar':
                             intelligence.discard(key)
                     elif error.retry_after:
-                        retry_at[key] = time.monotonic() + error.retry_after
+                        state = backoff.failure(
+                            source_key, revision_id, error.reason,
+                            base=error.retry_after,
+                        )
+                        print('Gate reagendado:', source_key, '| tentativa:',
+                              state['failures'], '| próxima em', state['delay'], 's')
                     continue
 
                 if not is_coupon and not is_mirror:
@@ -478,7 +510,11 @@ def run_publisher(args, parser):
                     if day:
                         ledger.release(key, day)
                     metrics.record_offer(offer, 'AGUARDANDO', 'SEM_IMAGEM')
-                    retry_at[key] = time.monotonic() + 60
+                    state = backoff.failure(
+                        source_key, revision_id, 'SEM_IMAGEM', base=60
+                    )
+                    print('Imagem ainda indisponível:', source_key, '| tentativa:',
+                          state['failures'], '| próxima em', state['delay'], 's')
                     continue
                 if args.simular:
                     if key not in announced:
@@ -513,6 +549,7 @@ def run_publisher(args, parser):
                     message_id, _ = sender(token, channel, offer, image)
                 except TelegramSendError as error:
                     if error.kind == 'uncertain':
+                        backoff.clear(source_key)
                         ledger.mark_uncertain(key, day)
                         metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                         print('Resposta Telegram incerta. Reserva marcada como uncertain:', key)
@@ -520,6 +557,7 @@ def run_publisher(args, parser):
 
                     ledger.release(key, day)
                     if error.kind == 'permanent':
+                        backoff.clear(source_key)
                         metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX')
                         gate_blocked[source_key] = revision
                         if origin == 'radar':
@@ -529,13 +567,14 @@ def run_publisher(args, parser):
                         continue
 
                     retry = max(error.retry_after, 1)
-                    retry_at[key] = time.monotonic() + retry
                     if error.kind == 'rate_limit':
+                        backoff.clear(source_key)
                         metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_429')
                         ledger.mark_attempt(retry, clock_id=3)
                         print('Telegram aplicou rate limit; fila pausada por', retry, 's.')
                         break
                     if error.kind == 'configuration':
+                        backoff.clear(source_key)
                         metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_CONFIG')
                         ledger.mark_attempt(retry, clock_id=3)
                         print('Telegram recusou a configuração do bot/canal; nova tentativa em',
@@ -543,16 +582,23 @@ def run_publisher(args, parser):
                         break
 
                     metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_TRANSITORIO')
+                    state = backoff.failure(
+                        source_key, revision_id, 'TELEGRAM_TRANSITORIO',
+                        base=retry,
+                    )
                     print('Falha transitória do Telegram:', key, '| código',
-                          error.error_code, '| nova tentativa em', retry, 's.')
+                          error.error_code, '| tentativa:', state['failures'],
+                          '| nova tentativa em', state['delay'], 's.')
                     continue
                 except Exception:
+                    backoff.clear(source_key)
                     ledger.mark_uncertain(key, day)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
                     break
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                backoff.clear(source_key)
                 if offer.get('source') == 'kabum_awin_coupon':
                     intelligence.discard(key)
                 metrics.record_offer(offer, 'PUBLICADA', published_message_id=message_id)

@@ -124,6 +124,64 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(ledger.publication_delay(clock_id=3), 0)
             ledger.db.close()
 
+    def test_transient_backoff_persists_and_does_not_block_other_offer(self):
+        from telegram_api import TelegramSendError
+
+        now = datetime.now(timezone.utc).isoformat()
+        first = dict(
+            product_id='Shopee:8:81',
+            url='https://shopee.com.br/product/8/81',
+            price='99,90', source='telegram', source_date=now,
+            api_image='https://x.susercontent.com/a.jpg',
+        )
+        second = dict(
+            product_id='Shopee:8:82',
+            url='https://shopee.com.br/product/8/82',
+            price='89,90', source='telegram', source_date=now,
+            api_image='https://x.susercontent.com/b.jpg',
+        )
+        client = Mock()
+        client.prepare.side_effect = lambda o: dict(
+            o, store='Shopee', affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            error = TelegramSendError(
+                'transient', 'Bad Gateway', error_code=502, retry_after=30
+            )
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                 patch.object(publisher, 'rows', return_value=iter([dict(first), dict(second)])), \
+                 patch.object(publisher, 'send', side_effect=[error, (701, 0)]) as send, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+
+            self.assertEqual(send.call_count, 2)
+            retry = ledger.db.execute(
+                "SELECT failures,next_at FROM publisher_retry WHERE retry_key=?",
+                (first['product_id'],),
+            ).fetchone()
+            self.assertIsNotNone(retry)
+            self.assertEqual(retry[0], 1)
+            self.assertGreater(retry[1], 0)
+
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
+                 patch.object(publisher, 'rows', return_value=iter([dict(first)])), \
+                 patch.object(publisher, 'send') as send_again, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+            send_again.assert_not_called()
+            ledger.db.close()
+
     def test_telegram_429_pauses_global_queue(self):
         from telegram_api import TelegramSendError
 

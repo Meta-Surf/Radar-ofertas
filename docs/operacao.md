@@ -299,7 +299,11 @@ cd /opt/radar
 ./.venv/bin/python radar_health.py --alert
 ```
 
-`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM, credenciais e reservas de publicação com resultado incerto.
+`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM, credenciais, reservas de publicação com resultado incerto e backoffs ativos do publicador.
+
+### Backoff do publicador
+
+Falhas transitórias de preparação, Gate, imagem ou Telegram são registradas em `publisher_retry` dentro de `publicacoes.sqlite3`. O atraso cresce por oferta e motivo, é limitado a 30 minutos e continua valendo após reinício do serviço. Uma alteração real na oferta muda sua revisão e libera uma nova tentativa imediatamente. Sucesso remove o backoff daquele item.
 
 ### Reconciliação de reservas
 

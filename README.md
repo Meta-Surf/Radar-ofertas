@@ -44,6 +44,8 @@ A validação forte é usada no Radar Shopee (API), Mercado Livre automático (l
 
 Se o Telegram rejeitar especificamente a mídia de um `sendPhoto` com erro 400 de foto/imagem/arquivo, o publicador tenta uma única vez como `sendMessage`, sem imagem. Outros 400 — como HTML inválido — não recebem retry cego.
 
+`publisher_backoff.py` mantém no `publicacoes.sqlite3` o backoff individual das falhas transitórias do publicador. A espera cresce progressivamente por oferta e motivo, até o teto de 30 minutos, sobrevive a reinícios e é zerada quando a origem muda ou a publicação é concluída. Condições que dependem de edição da origem, como preço ausente ou link estruturalmente inválido, não são reprocessadas em loop a cada segundo.
+
 ## Canal especial
 
 O modo espelho é ativado por `TG_ESPELHO_CHATS`. A configuração validada em produção usa a ID numérica do Telegram:

@@ -23,6 +23,7 @@ class RadarHealthTests(unittest.TestCase):
                 "ml_circuit_seconds": 0,
                 "ml_failures": {"ML_HTTP_403": 1},
                 "reservation_states": {"uncertain": 2},
+                "publisher_backoff": {"SEM_IMAGEM": 3, "TELEGRAM_TRANSITORIO": 1},
             },
             "kabum_stock": {"known_stock": 0, "products": 100, "coverage_pct": 0.0},
             "integrations": {
@@ -39,6 +40,8 @@ class RadarHealthTests(unittest.TestCase):
         self.assertIn("Serviços:", text)
         self.assertIn("Fila radar: 10", text)
         self.assertIn("Reservas: uncertain=2", text)
+        self.assertIn("Backoff publicador:", text)
+        self.assertIn("SEM_IMAGEM=3", text)
         self.assertIn("amazon_creators=PENDENTE", text)
         self.assertIn("KaBuM estoque: 0/100", text)
 

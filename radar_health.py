@@ -63,6 +63,7 @@ def database_health():
         "ml_quarantined": 0,
         "ml_circuit_seconds": 0,
         "reservation_states": {},
+        "publisher_backoff": {},
         "last_publication": "",
     }
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
@@ -110,6 +111,17 @@ def database_health():
                     """SELECT status,COUNT(*) FROM posts
                        WHERE status IN ('reserved','sending','uncertain')
                        GROUP BY status"""
+                )
+            )
+        except sqlite3.Error:
+            pass
+
+        try:
+            result["publisher_backoff"] = dict(
+                db.execute(
+                    """SELECT reason,COUNT(*) FROM publisher_retry
+                       WHERE next_at>? GROUP BY reason ORDER BY COUNT(*) DESC""",
+                    (time.time(),),
                 )
             )
         except sqlite3.Error:
@@ -224,6 +236,14 @@ def render(report):
             for name, count in sorted(reservation_states.items())
         )
         if reservation_states else "Reservas: nenhuma pendente"
+    )
+    retry_states = db.get("publisher_backoff", {})
+    lines.append(
+        "Backoff publicador: "
+        + ", ".join(
+            f"{reason}={count}" for reason, count in sorted(retry_states.items())
+        )
+        if retry_states else "Backoff publicador: nenhum ativo"
     )
     lines.append(
         f"ML: quarentena={db['ml_quarantined']} | "
