@@ -4,7 +4,7 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 
 > Imagens de canais específicos podem usar **rebranding visual** configurado por `TG_REBRAND_CHATS`: o monitor cobre banner e selo de preço da origem antes de publicar. Consulte `docs/operacao.md`.
 
-## Estado atual — 01/10/2026
+## Estado atual — 02/10/2026
 
 | Componente | Estado |
 |---|---|
@@ -94,8 +94,15 @@ O fluxo `.bat` continua documentado para execução local em Windows, mas não �
 
 Copie `.env.example` para `.env` apenas em uma instalação nova. Em instalações existentes, preserve o `.env` atual.
 
+A normalização, defaults e limites das opções operacionais ficam centralizados em `configuracao.py`. Os segredos continuam exclusivamente no `.env`. Para ver os valores efetivos **sem revelar credenciais**:
+
+```bash
+./.venv/bin/python configuracao.py
+```
+
 Principais grupos de configuração:
 
+- Operação: `RADAR_INTERVALO_PUBLICACAO=1200`, `IDADE_MAXIMA_MINUTOS=120`, `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45`, `INTERVALO_RECUPERADAS=30`, `TG_RECUPERAR_MINUTOS=30` e `TG_RECUPERAR_MAX_MENSAGENS=500`;
 - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;

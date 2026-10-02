@@ -1,7 +1,6 @@
 """Publicação Shopee com link gerado pela API de Afiliados. --simular não publica."""
 import argparse
 import json
-import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +24,7 @@ from mercadolivre_resiliencia import MLResilience
 from telegram_api import TelegramSendError, send_telegram
 from publisher_backoff import PublisherBackoff, offer_revision
 from fila_ofertas_sqlite import CapturedOfferQueue
+from configuracao import PublisherConfig, TelegramConfig
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -33,14 +33,11 @@ def rows(captured_queue=None):
     own_queue = captured_queue is None
     queue = captured_queue or CapturedOfferQueue(BASE / 'publicacoes.sqlite3')
     try:
-        max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
-        recovery_age = max(
-            1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45'))
-        )
+        config = PublisherConfig.from_env()
         queue.import_legacy_jsonl(
             BASE / 'fila_ofertas_v2.jsonl',
-            max_age_minutes=max_age,
-            recovery_max_age_minutes=min(max_age, recovery_age),
+            max_age_minutes=config.offer_max_age_minutes,
+            recovery_max_age_minutes=config.recovered_max_age_minutes,
         )
         yield from queue.pending()
     finally:
@@ -167,7 +164,9 @@ def main():
 
 
 def run_publisher(args, parser):
-    token, channel = os.getenv('TELEGRAM_TOKEN'), os.getenv('TELEGRAM_CANAL')
+    telegram = TelegramConfig.from_env()
+    config = PublisherConfig.from_env()
+    token, channel = telegram.token, telegram.channel
     if not args.simular and (not token or not channel):
         parser.error('Preencha TELEGRAM_TOKEN e TELEGRAM_CANAL no .env.')
     try:
@@ -190,11 +189,11 @@ def run_publisher(args, parser):
     except AffiliateError as e:
         amazon_affiliate = None
         print("Amazon Creators API indisponível:", str(e), "| ofertas Amazon ficarão aguardando.")
-    require_photo = os.getenv('EXIGIR_IMAGEM', '1') == '1'
-    interval = 1200  # Intervalo exclusivo das publicações originadas no radar.
-    recovery_interval = max(5, int(os.getenv('INTERVALO_RECUPERADAS', '30')))
-    recovery_max_age = max(1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45')))
-    max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
+    require_photo = config.require_image
+    interval = config.radar_interval_seconds
+    recovery_interval = config.recovered_interval_seconds
+    recovery_max_age = config.recovered_max_age_minutes
+    max_age = config.offer_max_age_minutes
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
     if not args.simular:
         reservation_recovery = ledger.reconcile_reservations()

@@ -1,8 +1,10 @@
-# Arquitetura atual — 30/09/2026
+# Arquitetura atual — 02/10/2026
 
 ## Visão geral
 
 O projeto separa captura, descoberta, enriquecimento, geração de afiliado e publicação. O objetivo é impedir que uma falha em uma loja ou origem provoque publicação incorreta em outra.
+
+`configuracao.py` concentra defaults, limites e parsing das opções operacionais compartilhadas. Segredos permanecem no `.env`; o módulo central lê apenas em runtime e oferece diagnóstico não sensível para evitar divergência entre monitor, publicador, Gate e alertas administrativos.
 
 ## Telegram
 

@@ -22,6 +22,7 @@ import canal_espelho as mirror
 import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
 from fila_ofertas_sqlite import CapturedOfferQueue
+from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -53,16 +54,13 @@ class CaptureRevisions:
 
 
 def bounded_env_int(name, default, minimum, maximum):
-    try:
-        value = int(os.getenv(name, str(default)).strip())
-    except (TypeError, ValueError):
-        value = default
-    return max(minimum, min(maximum, value))
+    """Compatibilidade: delega limites de inteiros ao parser central."""
+    return env_int(name, default, minimum=minimum, maximum=maximum)
 
 
 def configured_chat_values(name):
     """Valores de chat configurados no .env, normalizados para comparação."""
-    return {x.strip().lower() for x in os.getenv(name, '').split(',') if x.strip()}
+    return set(env_csv(name, lower=True))
 
 
 def dialog_config_keys(dialog):
@@ -218,7 +216,9 @@ async def main():
     parser.add_argument('--listar', action='store_true')
     parser.add_argument('--diagnosticar', metavar='URL_TELEGRAM', help='Inspeciona uma mensagem, sem baixar fotos, escrever fila ou publicar.')
     args = parser.parse_args()
-    api_id, api_hash = os.getenv('TG_API_ID', ''), os.getenv('TG_API_HASH', '')
+    telegram = TelegramConfig.from_env()
+    config = MonitorConfig.from_env()
+    api_id, api_hash = telegram.api_id, telegram.api_hash
     if not api_id.isdigit() or not api_hash:
         parser.error('Preencha TG_API_ID e TG_API_HASH no .env.')
     client = TelegramClient(str(BASE / 'monitor_ofertas'), int(api_id), api_hash, sequential_updates=True)
@@ -226,13 +226,13 @@ async def main():
     await client.start()
     try:
         dialogs = [d async for d in client.iter_dialogs() if d.is_group or d.is_channel]
-        paused_requested = configured_chat_values('TG_PAUSED_CHATS')
+        paused_requested = set(config.paused_chats)
         paused_chat_ids = {d.id for d in dialogs if dialog_is_configured(d, paused_requested)}
         if args.listar:
             for d in dialogs:
                 print(d.id, d.name)
             return
-        requested = [x.strip() for x in os.getenv('TG_CHATS', '').split(',') if x.strip()]
+        requested = list(config.chats)
         mirror_requested = mirror.configured_chats()
         for value in mirror_requested:
             if value not in requested:
@@ -258,7 +258,7 @@ async def main():
             if dialog_is_configured(match, paused_requested):
                 print('Chat pausado pela configuração; ignorando:', match.id, match.name)
                 continue
-            if str(match.id) == os.getenv('TELEGRAM_CANAL', '') or ('@' + str(getattr(match.entity, 'username', '')).lower()) == os.getenv('TELEGRAM_CANAL', '').lower():
+            if str(match.id) == telegram.channel or ('@' + str(getattr(match.entity, 'username', '')).lower()) == telegram.channel.lower():
                 parser.error('Remova o canal de destino de TG_CHATS para evitar ciclos.')
             selected.append(match.id)
             selected_dialogs[match.id] = match
@@ -266,7 +266,7 @@ async def main():
                 mirror_chat_ids.add(match.id)
         if not selected:
             parser.error('Nenhum chat válido de TG_CHATS foi encontrado nesta conta. Use --listar para conferir os IDs.')
-        allowed_media = {x.strip() for x in os.getenv('TG_MEDIA_CHATS', '').split(',') if x.strip()}
+        allowed_media = set(config.media_chats)
         allowed_media.update(str(chat_id) for chat_id in mirror_chat_ids)
         # Canais com rebranding precisam da foto original para gerar a versão limpa.
         allowed_media.update(image_branding.configured_chats())
@@ -274,14 +274,10 @@ async def main():
             allowed_media.add(ml_manual.chat_id())
         allowed_media.difference_update(str(chat_id) for chat_id in paused_chat_ids)
 
-        requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 30, 0, 1440)
-        publisher_max_age = bounded_env_int('IDADE_MAXIMA_MINUTOS', 120, 1, 1440)
-        recovery_publish_age = min(
-            publisher_max_age,
-            bounded_env_int('IDADE_MAXIMA_RECUPERADAS_MINUTOS', 45, 1, 1440),
-        )
-        recovery_minutes = min(requested_recovery, publisher_max_age)
-        recovery_limit = bounded_env_int('TG_RECUPERAR_MAX_MENSAGENS', 500, 20, 2000)
+        publisher_max_age = config.offer_max_age_minutes
+        recovery_publish_age = config.recovered_max_age_minutes
+        recovery_minutes = config.recovery_minutes
+        recovery_limit = config.recovery_limit
         recovery_state_path = BASE / 'monitor_recuperacao.json'
         recovery_state = load_monitor_state(recovery_state_path)
         metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')

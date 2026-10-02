@@ -1,19 +1,16 @@
 """Rebranding visual de imagens oriundas de canais específicos do Telegram."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from configuracao import TelegramConfig, env_csv, env_float, env_text
+
 
 def configured_chats() -> set[str]:
     """IDs autorizados a receber rebranding visual antes da publicação."""
-    return {
-        value.strip()
-        for value in os.getenv("TG_REBRAND_CHATS", "").split(",")
-        if value.strip()
-    }
+    return set(env_csv("TG_REBRAND_CHATS"))
 
 
 def enabled(chat_id) -> bool:
@@ -21,15 +18,11 @@ def enabled(chat_id) -> bool:
 
 
 def _float_env(name: str, default: float, minimum: float, maximum: float) -> float:
-    try:
-        value = float(os.getenv(name, str(default)).strip())
-    except (TypeError, ValueError):
-        value = default
-    return max(minimum, min(maximum, value))
+    return env_float(name, default, minimum=minimum, maximum=maximum)
 
 
 def _price_box() -> tuple[float, float, float, float]:
-    raw = os.getenv("TG_REBRAND_PRICE_BOX", "0.64,0.77,0.98,0.95")
+    raw = env_text("TG_REBRAND_PRICE_BOX", "0.64,0.77,0.98,0.95")
     try:
         values = tuple(float(part.strip()) for part in raw.split(","))
     except (TypeError, ValueError):
@@ -106,7 +99,7 @@ def apply(path: str | Path) -> Path:
     )
 
     title = "RADAR DE OFERTAS"
-    channel = os.getenv("TELEGRAM_CANAL", "").strip()
+    channel = TelegramConfig.from_env().channel
     subtitle = channel if channel.startswith("@") else "Ofertas selecionadas"
 
     title_font = _fit_font(

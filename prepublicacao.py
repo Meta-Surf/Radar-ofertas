@@ -1,6 +1,5 @@
 """Gate central de validação imediatamente antes da publicação."""
 import json
-import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -15,6 +14,7 @@ from kabum_afiliados import valid_affiliate_url as valid_kabum_link
 from amazon_afiliados import valid_affiliate_url as valid_amazon_link
 import cupons_kabum
 import cupons_mercadolivre as ml_coupons
+from configuracao import GateConfig
 
 
 class GateReject(AffiliateError):
@@ -35,12 +35,9 @@ class PrePublicationGate:
         self.kabum_affiliate = kabum_affiliate
         self.amazon_affiliate = amazon_affiliate
         self.ml_reader = ml_reader
-        self.source_price_max_age = max(
-            60, int(os.getenv("GATE_SOURCE_PRICE_MAX_AGE_SECONDS", "300") or 300)
-        )
-        self.kabum_max_age = max(
-            60, int(os.getenv("GATE_KABUM_FEED_MAX_AGE_SECONDS", "1800") or 1800)
-        )
+        config = GateConfig.from_env()
+        self.source_price_max_age = config.source_price_max_age_seconds
+        self.kabum_max_age = config.kabum_feed_max_age_seconds
         self._init_db()
     def _init_db(self):
         self.db.executescript("""

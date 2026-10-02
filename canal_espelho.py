@@ -1,10 +1,10 @@
 """Publicação espelho de ofertas de um canal especial."""
 import html
-import os
 import re
 from urllib.parse import urlsplit
 
 from shopee_afiliados import AffiliateError
+from configuracao import env_csv
 
 PLACEHOLDER = "__RADAR_LINK_AFILIADO__"
 SHOPEE_HOSTS = {"shopee.com.br", "www.shopee.com.br", "s.shopee.com.br", "shope.ee"}
@@ -24,7 +24,7 @@ SOCIAL_LINE_RE = re.compile(
 
 
 def configured_chats():
-    return {v.strip() for v in os.getenv("TG_ESPELHO_CHATS", "").split(",") if v.strip()}
+    return set(env_csv("TG_ESPELHO_CHATS"))
 
 
 def supported_store_url(url):

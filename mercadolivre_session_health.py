@@ -1,9 +1,10 @@
 """Saúde persistente da sessão de afiliados Mercado Livre."""
 import hashlib
-import os
 import time
 
 import requests
+
+from configuracao import TelegramConfig
 
 
 def credential_fingerprint(cookie, csrf, tag):
@@ -12,8 +13,8 @@ def credential_fingerprint(cookie, csrf, tag):
 
 
 def send_admin_alert(message, *, transport=None):
-    token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    chat = os.getenv("TELEGRAM_ADMIN_CHAT", "").strip()
+    telegram = TelegramConfig.from_env()
+    token, chat = telegram.token, telegram.admin_chat
     if not token or not chat:
         return False
     try:

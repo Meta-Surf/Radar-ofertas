@@ -58,7 +58,16 @@ py -u radar_shopee_continuo.py --enfileirar --loop --intervalo 1200 --limite 3
 py -u bot_ofertas_revisao.py
 ```
 
-O Radar Shopee pode gerar candidatos com frequência, mas o publicador libera no máximo uma tentativa de publicação do radar a cada **20 minutos**. Ofertas captadas dos canais não aguardam esse relógio.
+O Radar Shopee pode gerar candidatos com frequência, mas o publicador libera no máximo uma tentativa de publicação do radar a cada **20 minutos**. Esse relógio é centralizado em `RADAR_INTERVALO_PUBLICACAO=1200`. Ofertas captadas dos canais não aguardam esse relógio.
+
+A configuração operacional comum é normalizada por `configuracao.py`. Para conferir defaults, limites e valores efetivos sem exibir tokens/cookies:
+
+```bash
+cd /opt/radar
+./.venv/bin/python configuracao.py
+```
+
+Valores inválidos de inteiros/booleanos caem em defaults seguros e os limites são aplicados de forma idêntica no monitor, publicador e Gate.
 
 ## Prioridade
 

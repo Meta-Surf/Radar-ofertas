@@ -1,12 +1,12 @@
 """Relatório de qualidade das fontes Telegram."""
 import argparse
 import collections
-import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from configuracao import env_csv
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -20,7 +20,7 @@ PERIODS = {
 
 
 def configured(name):
-    return {x.strip().lower() for x in os.getenv(name, '').split(',') if x.strip()}
+    return set(env_csv(name, lower=True))
 
 
 def source_state(chat_id, username):

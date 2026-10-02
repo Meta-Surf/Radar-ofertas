@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+
+from configuracao import TelegramConfig, env_text, operational_snapshot
 from dotenv import load_dotenv
 
 BASE = Path(__file__).resolve().parent
@@ -268,6 +270,7 @@ def collect():
         "backup": backup,
         "kabum_stock": kabum,
         "integrations": integrations,
+        "operational_config": operational_snapshot(),
         "critical": critical,
         "warnings": warnings,
     }
@@ -279,6 +282,20 @@ def render(report):
             for name, state in report["services"].items()
         )
     )
+    config = report.get("operational_config", {})
+    publisher = config.get("publisher", {})
+    monitor = config.get("monitor", {})
+    gate = config.get("gate", {})
+    if publisher:
+        lines.append(
+            "Config: "
+            f"radar={publisher.get('radar_interval_seconds', 0)}s | "
+            f"idade={publisher.get('offer_max_age_minutes', 0)}m | "
+            f"recuperadas={publisher.get('recovered_max_age_minutes', 0)}m/"
+            f"{publisher.get('recovered_interval_seconds', 0)}s | "
+            f"recovery={monitor.get('recovery_minutes', 0)}m | "
+            f"gate_preco={gate.get('source_price_max_age_seconds', 0)}s"
+        )
     db = report["database"]
     lines.append(
         f"Fila radar: {db['queue_total']} | fontes: "
@@ -353,12 +370,12 @@ def render(report):
 
 
 def alert(report):
-    token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    chat = os.getenv("TELEGRAM_ADMIN_CHAT", "").strip()
+    telegram = TelegramConfig.from_env()
+    token, chat = telegram.token, telegram.admin_chat
     if not token or not chat:
         return False, "TELEGRAM_ADMIN_CHAT não configurado"
     state_path = Path(
-        os.getenv(
+        env_text(
             "RADAR_HEALTH_STATE",
             str(Path.home() / ".local/state/radar/health.json"),
         )

@@ -33,6 +33,16 @@ class RadarHealthTests(unittest.TestCase):
                 },
             },
             "kabum_stock": {"known_stock": 0, "products": 100, "coverage_pct": 0.0},
+            "operational_config": {
+                "publisher": {
+                    "radar_interval_seconds": 1200,
+                    "offer_max_age_minutes": 120,
+                    "recovered_max_age_minutes": 45,
+                    "recovered_interval_seconds": 30,
+                },
+                "monitor": {"recovery_minutes": 30},
+                "gate": {"source_price_max_age_seconds": 300},
+            },
             "integrations": {
                 "shopee": True,
                 "mercadolivre": True,
@@ -45,6 +55,8 @@ class RadarHealthTests(unittest.TestCase):
         }
         text = health.render(report)
         self.assertIn("Serviços:", text)
+        self.assertIn("Config: radar=1200s", text)
+        self.assertIn("recuperadas=45m/30s", text)
         self.assertIn("Fila radar: 10", text)
         self.assertIn("Fila capturada: 4", text)
         self.assertIn("Shopee=3", text)
