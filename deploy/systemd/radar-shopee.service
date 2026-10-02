@@ -12,6 +12,7 @@ ExecStart=/opt/radar/.venv/bin/python -u /opt/radar/radar_shopee_continuo.py --e
 Restart=always
 RestartSec=15
 Environment=PYTHONUNBUFFERED=1
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

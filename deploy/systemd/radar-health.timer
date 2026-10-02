@@ -1,0 +1,12 @@
+[Unit]
+Description=Radar de Ofertas - Health Check a cada 5 minutos
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+RandomizedDelaySec=30
+Unit=radar-health.service
+
+[Install]
+WantedBy=timers.target

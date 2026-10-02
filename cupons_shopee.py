@@ -118,7 +118,7 @@ def build_alerts(messages, chat_id):
                  source_date=date, chat_id=chat_id, message_id=messages[0].id)
             for i in range(0, len(entries), 6)]
 
-def prepare_alert(client, alert):
+def prepare_alert(client, alert, publish_destination="telegram"):
     from shopee_afiliados import AffiliateError
     entries = alert.get('entries')
     if not isinstance(entries, list) or not 1 <= len(entries) <= 6:
@@ -132,7 +132,13 @@ def prepare_alert(client, alert):
             destination = resolve_coupon(entry.get('url'))
             if product(destination):
                 raise AffiliateError('Link resolvido é de produto, não de cupons.')
-            converted = client.generate_coupon_link(destination)
+            converted = (
+                client.generate_coupon_link(destination)
+                if publish_destination == "telegram"
+                else client.generate_coupon_link(
+                    destination, publish_destination=publish_destination
+                )
+            )
             if converted == entry.get('url'):
                 raise AffiliateError('A API devolveu o link original do grupo.')
         except AffiliateError as error:

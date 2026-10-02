@@ -1,11 +1,17 @@
 """Reconciliação explícita de envios incertos, sem liberação automática."""
 import argparse
+import os
 import sqlite3
 import time
 from pathlib import Path
 
+from distribuicao import DeliveryOutbox
+from dotenv import load_dotenv
+
 BASE = Path(__file__).resolve().parent
 DB = BASE / "publicacoes.sqlite3"
+load_dotenv(BASE / ".env", encoding="utf-8-sig")
+TELEGRAM_CHANNEL = str(os.getenv("TELEGRAM_CANAL") or "")
 
 
 def uncertain_rows(db):
@@ -29,6 +35,7 @@ def show(db):
 
 
 def resolve_not_sent(db, product, day):
+    DeliveryOutbox(db)
     args = [product]
     sql = "DELETE FROM posts WHERE product=? AND status='uncertain'"
     if day:
@@ -36,6 +43,16 @@ def resolve_not_sent(db, product, day):
         args.append(day)
     with db:
         result = db.execute(sql, args)
+        if result.rowcount == 1:
+            delivery_args = [product]
+            delivery_sql = (
+                "DELETE FROM deliveries WHERE product=? AND destination='telegram' "
+                "AND state='UNCERTAIN'"
+            )
+            if day:
+                delivery_sql += " AND day=?"
+                delivery_args.append(day)
+            db.execute(delivery_sql, delivery_args)
     if result.rowcount != 1:
         raise SystemExit(
             f"Nenhuma resolução feita: esperado 1 registro uncertain; encontrados {result.rowcount}."
@@ -44,6 +61,13 @@ def resolve_not_sent(db, product, day):
 
 
 def resolve_sent(db, product, day, message_id):
+    outbox = DeliveryOutbox(db)
+    if not day:
+        row = db.execute(
+            "SELECT day FROM posts WHERE product=? AND status='uncertain' LIMIT 1",
+            (product,),
+        ).fetchone()
+        day = str(row[0]) if row else ""
     args = [int(message_id), time.time(), product]
     sql = """UPDATE posts SET status='sent', message_id=?, updated_at=?
              WHERE product=? AND status='uncertain'"""
@@ -52,6 +76,12 @@ def resolve_sent(db, product, day, message_id):
         args.append(day)
     with db:
         result = db.execute(sql, args)
+        if result.rowcount == 1:
+            outbox.record_sent(
+                product, destination="telegram", account=TELEGRAM_CHANNEL,
+                surface="channel", day=day or "", external_id=message_id,
+                payload=None, commit=False,
+            )
     if result.rowcount != 1:
         raise SystemExit(
             f"Nenhuma resolução feita: esperado 1 registro uncertain; encontrados {result.rowcount}."

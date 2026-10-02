@@ -386,6 +386,7 @@ class Ledger:
     RESERVATION_STALE_SECONDS = 600
 
     def __init__(self, path):
+        from distribuicao import DeliveryOutbox
         self.db = sqlite3.connect(path, timeout=30)
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS posts (product TEXT, day TEXT, status TEXT, message_id INTEGER, PRIMARY KEY(product, day))')
@@ -399,6 +400,7 @@ class Ledger:
                 self.db.execute(f'ALTER TABLE posts ADD COLUMN {name} {kind}')
         self.db.execute('CREATE INDEX IF NOT EXISTS posts_status_idx ON posts(status)')
         self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
+        self.deliveries = DeliveryOutbox(self.db)
         self.db.commit()
 
     def publication_delay(self, clock_id=1):
@@ -479,7 +481,7 @@ class Ledger:
             )
         return bool(result.rowcount)
 
-    def mark_uncertain(self, product_id, day):
+    def mark_uncertain(self, product_id, day, *, offer=None, channel=""):
         now = time.time()
         with self.db:
             result = self.db.execute(
@@ -487,6 +489,12 @@ class Ledger:
                    WHERE product=? AND day=? AND status IN ('reserved','sending')""",
                 (now, product_id, day),
             )
+            if result.rowcount:
+                self.deliveries.record_uncertain(
+                    product_id, destination="telegram", account=channel,
+                    surface="channel", day=day, payload=offer,
+                    reason="ENVIO_INCERTO", commit=False,
+                )
         return bool(result.rowcount)
 
     def finish(self, product_id, day, message_id, offer=None, channel=""):
@@ -497,6 +505,11 @@ class Ledger:
                 """UPDATE posts SET status=?, message_id=?, updated_at=?
                    WHERE product=? AND day=?""",
                 ('sent', message_id, time.time(), product_id, day),
+            )
+            self.deliveries.record_sent(
+                product_id, destination="telegram", account=channel,
+                surface="channel", day=day, external_id=message_id,
+                payload=offer, commit=False,
             )
             if offer and offer.get('kind') != 'coupon_alert':
                 intelligence.record(offer, channel, message_id)

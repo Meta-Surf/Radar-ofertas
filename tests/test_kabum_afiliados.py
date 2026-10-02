@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import canal_espelho as mirror
 import bot_ofertas_revisao as publisher
 import publicacao_oferta as offer_publisher
-from kabum_afiliados import KabumAffiliate, valid_affiliate_url
+from kabum_afiliados import KabumAffiliate, attributed_affiliate_url, valid_affiliate_url
 from ofertas_core import product, safe_url
 from shopee_afiliados import AffiliateError
 
@@ -57,6 +57,12 @@ class KabumAffiliateTests(unittest.TestCase):
             self.assertEqual(prepared["affiliate_url"], AWIN)
             self.assertTrue(prepared["affiliate_generated"])
             self.assertTrue(valid_affiliate_url(prepared["affiliate_url"]))
+
+    def test_instagram_adds_destination_clickref_without_changing_telegram(self):
+        self.assertEqual(attributed_affiliate_url(AWIN, 'telegram'), AWIN)
+        instagram = attributed_affiliate_url(AWIN, 'instagram')
+        self.assertIn('clickref=instagram', instagram)
+        self.assertTrue(valid_affiliate_url(instagram))
 
     def test_sender_accepts_only_valid_kabum_awin_link(self):
         offer = {

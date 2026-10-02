@@ -8,6 +8,14 @@ import os
 
 
 RADAR_INTERVAL_SECONDS = 1200
+
+
+def secure_runtime_permissions():
+    """Restringe novos arquivos do processo a owner-only em ambientes POSIX."""
+    if os.name == "posix":
+        os.umask(0o077)
+
+
 OFFER_MAX_AGE_MINUTES = 120
 RECOVERED_MAX_AGE_MINUTES = 45
 RECOVERED_INTERVAL_SECONDS = 30
@@ -194,12 +202,23 @@ class GateConfig:
         )
 
 
+@dataclass(frozen=True)
+class DistributionConfig:
+    active_destinations: tuple
+
+    @classmethod
+    def from_env(cls):
+        values = env_csv("RADAR_DESTINOS_ATIVOS", lower=True) or ("telegram",)
+        return cls(active_destinations=tuple(dict.fromkeys(values)))
+
+
 def operational_snapshot():
     """Resumo não sensível para diagnóstico e documentação."""
     publisher = PublisherConfig.from_env()
     monitor = MonitorConfig.from_env()
     gate = GateConfig.from_env()
     telegram = TelegramConfig.from_env()
+    distribution = DistributionConfig.from_env()
     return {
         "publisher": {
             "require_image": publisher.require_image,
@@ -219,6 +238,9 @@ def operational_snapshot():
             "source_price_max_age_seconds": gate.source_price_max_age_seconds,
             "kabum_feed_max_age_seconds": gate.kabum_feed_max_age_seconds,
         },
+        "distribution": {
+            "active_destinations": distribution.active_destinations,
+        },
         "telegram": {
             "channel_configured": bool(telegram.channel),
             "admin_chat_configured": bool(telegram.admin_chat),
@@ -234,6 +256,14 @@ def validate_operational_config():
     telegram = TelegramConfig.from_env()
     publisher = PublisherConfig.from_env()
     monitor = MonitorConfig.from_env()
+    distribution = DistributionConfig.from_env()
+
+    supported = {"telegram", "instagram", "whatsapp"}
+    unknown = [d for d in distribution.active_destinations if d not in supported]
+    if unknown:
+        problems.append("RADAR_DESTINOS_ATIVOS contém destino desconhecido")
+    if any(d != "telegram" for d in distribution.active_destinations):
+        problems.append("destinos externos ainda não possuem adaptador ativo")
 
     if not telegram.token:
         problems.append("TELEGRAM_TOKEN ausente")

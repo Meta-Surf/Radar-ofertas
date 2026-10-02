@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest.mock import patch
 
 from mercadolivre_afiliados import (
     ENDPOINT,
@@ -65,6 +67,15 @@ class MercadoLivreAffiliateTests(unittest.TestCase):
         self.assertIn("ssid=renewed", call["headers"]["Cookie"])
         self.assertEqual(call["headers"]["Origin"], "https://www.mercadolivre.com.br")
         self.assertEqual(call["headers"]["Referer"], LINKBUILDER)
+
+    def test_destination_requires_and_uses_own_tag(self):
+        transport = Transport()
+        client = self.client(transport, refresh=False)
+        with self.assertRaises(AffiliateError):
+            client.generate_link(URL, destination='instagram')
+        with patch.dict(os.environ, {'ML_AFFILIATE_TAG_INSTAGRAM':'insta_tag'}):
+            self.assertEqual(client.generate_link(URL, destination='instagram'), SHORT)
+        self.assertEqual(transport.post_calls[-1][1]['json']['tag'], 'insta_tag')
 
     def test_cache_avoids_generating_same_link_twice(self):
         transport = Transport()

@@ -24,7 +24,7 @@ from telegram_api import TelegramSendError
 from publicacao_oferta import send_offer as send, valid_price
 from publisher_backoff import PublisherBackoff, offer_revision
 from fila_ofertas_sqlite import CapturedOfferQueue
-from configuracao import PublisherConfig, TelegramConfig
+from configuracao import PublisherConfig, TelegramConfig, secure_runtime_permissions
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -108,6 +108,7 @@ def metric_reason_from_error(error):
 
 
 def main():
+    secure_runtime_permissions()
     parser = argparse.ArgumentParser()
     parser.add_argument('--simular', action='store_true')
     args = parser.parse_args()
@@ -149,6 +150,10 @@ def run_publisher(args, parser):
     recovery_max_age = config.recovered_max_age_minutes
     max_age = config.offer_max_age_minutes
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
+    if not args.simular:
+        migrated_deliveries = ledger.deliveries.backfill_telegram_posts(channel)
+        if migrated_deliveries:
+            print('Histórico Telegram migrado para entregas multicanal:', migrated_deliveries)
     if not args.simular:
         reservation_recovery = ledger.reconcile_reservations()
         if (reservation_recovery['moved_to_uncertain']
@@ -575,7 +580,7 @@ def run_publisher(args, parser):
                 except TelegramSendError as error:
                     if error.kind == 'uncertain':
                         backoff.clear(source_key)
-                        ledger.mark_uncertain(key, day)
+                        ledger.mark_uncertain(key, day, offer=offer, channel=channel)
                         metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                         print('Resposta Telegram incerta. Reserva marcada como uncertain:', key)
                         break
@@ -618,7 +623,7 @@ def run_publisher(args, parser):
                     continue
                 except Exception:
                     backoff.clear(source_key)
-                    ledger.mark_uncertain(key, day)
+                    ledger.mark_uncertain(key, day, offer=offer, channel=channel)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')

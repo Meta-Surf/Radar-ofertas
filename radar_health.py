@@ -11,7 +11,7 @@ from pathlib import Path
 
 import requests
 
-from configuracao import TelegramConfig, env_text, operational_snapshot
+from configuracao import TelegramConfig, env_text, operational_snapshot, secure_runtime_permissions
 from dotenv import load_dotenv
 
 BASE = Path(__file__).resolve().parent
@@ -68,6 +68,7 @@ def database_health():
         "ml_circuit_seconds": 0,
         "reservation_states": {},
         "publisher_backoff": {},
+        "deliveries": {},
         "ml_affiliate_session": {
             "state": "unknown", "failures": 0, "retry_after": 0,
             "last_status": 0, "last_success": 0, "last_failure": 0,
@@ -154,6 +155,15 @@ def database_health():
                     (time.time(),),
                 )
             )
+        except sqlite3.Error:
+            pass
+
+        try:
+            for destination, state, count in db.execute(
+                "SELECT destination,state,COUNT(*) FROM deliveries "
+                "GROUP BY destination,state ORDER BY destination,state"
+            ):
+                result["deliveries"].setdefault(destination, {})[state] = int(count)
         except sqlite3.Error:
             pass
 
@@ -296,6 +306,12 @@ def render(report):
             f"recovery={monitor.get('recovery_minutes', 0)}m | "
             f"gate_preco={gate.get('source_price_max_age_seconds', 0)}s"
         )
+    distribution = config.get("distribution", {})
+    if distribution:
+        lines.append(
+            "Destinos ativos: "
+            + ", ".join(distribution.get("active_destinations", ("telegram",)))
+        )
     db = report["database"]
     lines.append(
         f"Fila radar: {db['queue_total']} | fontes: "
@@ -317,6 +333,18 @@ def render(report):
         )
         if reservation_states else "Reservas: nenhuma pendente"
     )
+    deliveries = db.get("deliveries", {})
+    if deliveries:
+        lines.append(
+            "Entregas multicanal: " + "; ".join(
+                destination + "=" + ",".join(
+                    f"{state.lower()}:{count}" for state, count in sorted(states.items())
+                )
+                for destination, states in sorted(deliveries.items())
+            )
+        )
+    else:
+        lines.append("Entregas multicanal: schema pronto; sem entregas espelhadas")
     retry_states = db.get("publisher_backoff", {})
     lines.append(
         "Backoff publicador: "
@@ -416,6 +444,7 @@ def alert(report):
 
 
 def main():
+    secure_runtime_permissions()
     load_dotenv(BASE / ".env", encoding="utf-8-sig")
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")

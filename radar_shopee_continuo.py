@@ -353,6 +353,8 @@ def run_round(args, parser):
 
 
 def main():
+    from configuracao import secure_runtime_permissions
+    secure_runtime_permissions()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--publicar', action='store_true', help='Envia ao TELEGRAM_CANAL configurado no .env.')
     parser.add_argument('--enfileirar', action='store_true', help='Entrega ofertas ao publicador unificado, sem envio direto.')

@@ -150,7 +150,20 @@ class MercadoLivreAffiliate:
             self.cookie = _cookie_header(merged)
         return self.cookie
 
-    def request(self, canonical_url):
+    def tag_for_destination(self, destination="telegram"):
+        from distribuicao import normalize_destination
+        destination = normalize_destination(destination)
+        if destination == "telegram":
+            return self.tag
+        env_name = "ML_AFFILIATE_TAG_" + destination.upper().replace("-", "_")
+        value = str(os.getenv(env_name, "") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", value):
+            raise AffiliateError(
+                f"Configure {env_name} antes de publicar Mercado Livre em {destination}."
+            )
+        return value
+
+    def request(self, canonical_url, destination="telegram"):
         headers = self._base_headers()
         headers.update(
             {
@@ -161,11 +174,12 @@ class MercadoLivreAffiliate:
                 "Cookie": self._refreshed_cookie(),
             }
         )
+        tag = self.tag_for_destination(destination)
         try:
             response = self.transport.post(
                 ENDPOINT,
                 headers=headers,
-                json={"urls": [canonical_url], "tag": self.tag},
+                json={"urls": [canonical_url], "tag": tag},
                 timeout=(10, 30),
                 allow_redirects=False,
             )
@@ -200,16 +214,19 @@ class MercadoLivreAffiliate:
             )
         return data
 
-    def generate_link(self, url):
+    def generate_link(self, url, destination="telegram"):
+        from distribuicao import normalize_destination
+        destination = normalize_destination(destination)
         identified = product(url)
         if not identified or identified[1] != "Mercado Livre":
             raise AffiliateError("É necessário um link reconhecido de produto Mercado Livre.")
         canonical = identified[2]
-        cached = self.cache.get(canonical)
+        cache_key = (canonical, destination)
+        cached = self.cache.get(cache_key)
         if cached:
             return cached
 
-        data = self.request(canonical)
+        data = self.request(canonical, destination=destination)
         values = data.get("urls")
         if not isinstance(values, list) or len(values) != 1 or not isinstance(values[0], dict):
             raise AffiliateError(
@@ -220,10 +237,10 @@ class MercadoLivreAffiliate:
             raise AffiliateError(
                 "Mercado Livre não devolveu um link de afiliado válido; publicação bloqueada."
             )
-        self.cache[canonical] = short
+        self.cache[cache_key] = short
         return short
 
-    def prepare(self, offer):
+    def prepare(self, offer, destination="telegram"):
         if offer.get("kind") != "ml_offer" or offer.get("source") != "telegram":
             raise AffiliateError("Oferta Mercado Livre fora do fluxo automático autorizado.")
         identified = product(offer.get("url", ""))
@@ -234,7 +251,9 @@ class MercadoLivreAffiliate:
         ):
             raise AffiliateError("Produto Mercado Livre divergente da URL captada.")
         output = dict(offer, store="Mercado Livre")
-        output["affiliate_url"] = self.generate_link(identified[2])
+        output["affiliate_url"] = self.generate_link(
+            identified[2], destination=destination
+        )
         output["affiliate_generated"] = True
         return output
 

@@ -77,13 +77,24 @@ class ShopeeAffiliate:
             raise AffiliateError('API Shopee não retornou dados da operação.')
         return result['data']
 
-    def generate_link(self, canonical_url):
+    def sub_id_for_destination(self, destination="telegram"):
+        from distribuicao import normalize_destination
+        destination = normalize_destination(destination)
+        if destination == "telegram":
+            return self.sub_id
+        env_name = "SHOPEE_SUB_ID_" + destination.upper().replace("-", "_")
+        value = str(os.getenv(env_name, destination.replace("-", "")) or "").strip()
+        if not value.isalnum() or len(value) > 30:
+            raise AffiliateError(f"{env_name} deve conter de 1 a 30 letras/números.")
+        return value
+
+    def generate_link(self, canonical_url, destination="telegram"):
         identified = product(canonical_url)
         if not identified or identified[1] != 'Shopee':
             raise AffiliateError('É necessário um link de produto Shopee reconhecido.')
         # A origem é normalizada, sem parâmetros do afiliado do grupo de origem.
         origin = json.dumps(identified[2])
-        sub = json.dumps(self.sub_id)
+        sub = json.dumps(self.sub_id_for_destination(destination))
         query = f'mutation {{ generateShortLink(input: {{originUrl: {origin}, subIds: [{sub}]}}) {{ shortLink }} }}'
         data = self.request(query)
         result = data.get('generateShortLink') or {}
@@ -92,12 +103,13 @@ class ShopeeAffiliate:
             raise AffiliateError('A Shopee não devolveu um link de afiliado válido; publicação bloqueada.')
         return link
 
-    def generate_coupon_link(self, destination):
+    def generate_coupon_link(self, destination, publish_destination="telegram"):
         from cupons_shopee import canonical_destination
         clean = canonical_destination(destination)
         if not clean or product(clean):
             raise AffiliateError('É necessário um destino Shopee de cupons reconhecido.')
-        origin, sub = json.dumps(clean), json.dumps(self.sub_id)
+        origin = json.dumps(clean)
+        sub = json.dumps(self.sub_id_for_destination(publish_destination))
         data = self.request(f'mutation {{ generateShortLink(input: {{originUrl: {origin}, subIds: [{sub}]}}) {{ shortLink }} }}')
         result = data.get('generateShortLink') or {}
         link = result.get('shortLink') if isinstance(result, dict) else None
@@ -124,12 +136,16 @@ class ShopeeAffiliate:
                 return node
         return {}
 
-    def prepare(self, offer):
+    def prepare(self, offer, destination="telegram"):
         if offer.get('source') == 'shopee_api':
             from radar_shopee import refresh
             offer = refresh(self, offer)
         output = dict(offer)
-        output['affiliate_url'] = self.generate_link(offer['url'])
+        output['affiliate_url'] = (
+            self.generate_link(offer['url'])
+            if destination == "telegram"
+            else self.generate_link(offer['url'], destination=destination)
+        )
         output['affiliate_generated'] = True
         # Falha de metadados não substitui nem invalida o link já gerado.
         try:

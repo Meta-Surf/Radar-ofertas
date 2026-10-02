@@ -12,6 +12,7 @@ ExecStart=/opt/radar/.venv/bin/python -u /opt/radar/monitor_ofertas.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from kabum_afiliados import valid_affiliate_url
+from kabum_afiliados import attributed_affiliate_url, valid_affiliate_url
 from telegram_api import send_telegram
 from ofertas_core import product
 from shopee_afiliados import AffiliateError
@@ -125,7 +125,7 @@ def collect_alerts(offers, affiliate, now=None):
     return alerts
 
 
-def prepare_alert(affiliate, alert, now=None):
+def prepare_alert(affiliate, alert, now=None, destination="telegram"):
     if not isinstance(alert, dict) or alert.get("store") != "KaBuM":
         raise AffiliateError("Alerta KaBuM inválido.")
     if alert.get("source") != "kabum_awin_coupon":
@@ -141,11 +141,12 @@ def prepare_alert(affiliate, alert, now=None):
     if not end or now >= end:
         raise AffiliateError("Cupom KaBuM expirado.")
     link = str(alert.get("affiliate_url") or "").strip()
+    target = str(alert.get("destination_url") or "")
     if not valid_affiliate_url(link):
-        destination = str(alert.get("destination_url") or "")
-        if not safe_destination(destination):
+        if not safe_destination(target):
             raise AffiliateError("Destino do cupom KaBuM inválido.")
-        link = affiliate._link_builder(destination)
+        link = affiliate._link_builder(target, destination=destination)
+    link = attributed_affiliate_url(link, destination)
     if not valid_affiliate_url(link):
         raise AffiliateError("Cupom KaBuM sem tracking Awin válido.")
     return dict(alert, affiliate_url=link, affiliate_generated=True)

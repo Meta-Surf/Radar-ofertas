@@ -31,6 +31,14 @@ class AffiliateTests(unittest.TestCase):
         self.assertIn('Signature='+expected,args['headers']['Authorization'])
         self.assertNotIn('outro',json.loads(body)['query'])
         self.assertFalse(args['allow_redirects'])
+    def test_destination_uses_own_sub_id(self):
+        client, transport=self.client({'data':{'generateShortLink':{'shortLink':LINK}}})
+        with patch.dict(os.environ, {'SHOPEE_SUB_ID_INSTAGRAM':'insta2026'}):
+            self.assertEqual(client.generate_link(URL, destination='instagram'), LINK)
+        query=json.loads(transport.post.call_args.kwargs['data'])['query']
+        self.assertIn('insta2026', query)
+        self.assertNotIn('telegram', query)
+
     def test_missing_credentials(self):
         with self.assertRaises(AffiliateError):
             ShopeeAffiliate('', '', transport=Mock())

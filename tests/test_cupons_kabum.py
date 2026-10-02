@@ -54,6 +54,15 @@ class KabumCouponTests(unittest.TestCase):
         self.assertEqual(alert["source"], "kabum_awin_coupon")
         affiliate._link_builder.assert_not_called()
 
+    def test_prepare_attribution_is_destination_specific(self):
+        affiliate = Mock()
+        alert = ck.alert_from_offer(voucher(), affiliate, NOW)
+        prepared = ck.prepare_alert(
+            affiliate, alert, now=NOW, destination='instagram'
+        )
+        self.assertIn('clickref=instagram', prepared['affiliate_url'])
+        affiliate._link_builder.assert_not_called()
+
     def test_caption_removes_embedded_url_and_keeps_code_and_validity(self):
         item = voucher()
         item["title"] += " https://www.kabum.com.br/promocao/teste"

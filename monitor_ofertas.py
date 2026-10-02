@@ -22,7 +22,7 @@ import canal_espelho as mirror
 import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
 from fila_ofertas_sqlite import CapturedOfferQueue
-from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int
+from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int, secure_runtime_permissions
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -212,6 +212,7 @@ async def edited_messages(client, event):
     return [album[key] for key in sorted(album)]
 
 async def main():
+    secure_runtime_permissions()
     parser = argparse.ArgumentParser()
     parser.add_argument('--listar', action='store_true')
     parser.add_argument('--diagnosticar', metavar='URL_TELEGRAM', help='Inspeciona uma mensagem, sem baixar fotos, escrever fila ou publicar.')

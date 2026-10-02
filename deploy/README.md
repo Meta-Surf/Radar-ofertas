@@ -19,7 +19,10 @@ sudo systemctl enable --now radar-monitor.service
 sudo systemctl enable --now radar-publicador.service
 sudo systemctl enable --now radar-shopee.service
 sudo systemctl enable --now radar-backup.timer
+sudo systemctl enable --now radar-health.timer
 ```
+
+Os três serviços principais usam `UMask=0077`, de modo que novos arquivos operacionais sejam privados por padrão. O código de produção também aplica essa máscara no processo para manter a proteção mesmo antes de uma reinstalação dos units.
 
 ## Backup
 
@@ -42,11 +45,18 @@ Ele inclui:
 
 Filas JSONL antigas não fazem parte do backup ativo porque foram substituídas pelo SQLite.
 
+### Cópia externa criptografada
+
+`deploy/radar-backup-export.sh` exporta o backup mais recente somente após criptografia GPG. Configure `RADAR_BACKUP_GPG_RECIPIENT` com uma chave pública disponível na VPS e `RADAR_BACKUP_EXTERNAL_DIR` com um volume/diretório externo montado. A chave privada não deve ficar na VPS.
+
+O exportador falha fechado se destinatário ou destino externo não estiverem configurados. A retenção padrão dos arquivos criptografados no destino é de 30 dias.
+
 ## Verificação
 
 ```bash
 systemctl is-active radar-monitor.service radar-publicador.service radar-shopee.service
 systemctl is-active radar-backup.timer
+systemctl is-active radar-health.timer
 cd /opt/radar
 ./.venv/bin/python configuracao.py
 ./.venv/bin/python radar_health.py

@@ -18,8 +18,8 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 | KaBuM | KaBuM 2.0 em produção via Awin: Product Feed, histórico, ranking, Link Builder, Offers API, cupons oficiais e publicação unificada no Telegram |
 | Gate pré-publicação | Ativo; revalida identidade, link, preço/validade quando há fonte confiável, deduplicação e estoque explícito antes do envio |
 | Amazon | Integração Creators API implementada em modo fail-closed; aguarda Partner Tag e credenciais OAuth da conta de Associados |
-| Saúde operacional | `radar_health.py` verifica serviços, filas, backups, ML, estoque KaBuM e credenciais; alerta privado opcional |
-| Instagram e WhatsApp | Publicação multicanal pendente |
+| Saúde operacional | `radar_health.py` verifica serviços, filas, backups, ML, estoque KaBuM e credenciais; na VPS roda a cada 5 min e alerta somente em mudança relevante |
+| Instagram e WhatsApp | Fundação multicanal pronta e fail-closed; adaptadores de publicação ainda não ativados |
 
 O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
 
@@ -102,7 +102,7 @@ A normalização, defaults e limites das opções operacionais ficam centralizad
 
 Principais grupos de configuração:
 
-- Operação: `RADAR_INTERVALO_PUBLICACAO=1200`, `IDADE_MAXIMA_MINUTOS=120`, `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45`, `INTERVALO_RECUPERADAS=30`, `TG_RECUPERAR_MINUTOS=30` e `TG_RECUPERAR_MAX_MENSAGENS=500`;
+- Operação: `RADAR_INTERVALO_PUBLICACAO=1200`, `IDADE_MAXIMA_MINUTOS=120`, `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45`, `INTERVALO_RECUPERADAS=30`, `TG_RECUPERAR_MINUTOS=30`, `TG_RECUPERAR_MAX_MENSAGENS=500` e `RADAR_DESTINOS_ATIVOS=telegram`;
 - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;
@@ -162,7 +162,7 @@ Cupons genéricos KaBuM usam `cupons_kabum.py` e `assets/banner_cupons_kabum.png
 
 ## Recuperação e persistência
 
-O monitor reprocessa por padrão mensagens recentes ao iniciar. As filas ativas ficam em `publicacoes.sqlite3`: `captured_queue` recebe ofertas dos grupos/canais e `radar_queue` recebe os radares contínuos. A fila capturada substitui revisões antigas da mesma mensagem, expira entradas pela janela de publicação e remove itens enviados com sucesso. O antigo `fila_ofertas_v2.jsonl` é apenas uma fonte de migração compatível para instalações existentes.
+O monitor reprocessa por padrão mensagens recentes ao iniciar. As filas ativas ficam em `publicacoes.sqlite3`: `captured_queue` recebe ofertas dos grupos/canais e `radar_queue` recebe os radares contínuos. A fila capturada substitui revisões antigas da mesma mensagem, expira entradas pela janela de publicação e remove itens enviados com sucesso. O antigo `fila_ofertas_v2.jsonl` é apenas uma fonte de migração compatível para instalações existentes. A tabela `deliveries` é a fundação aditiva da distribuição multicanal: nesta fase o Telegram continua controlado pelo ledger legado e cada envio confirmado/incerto é espelhado na nova estrutura com `external_id` textual.
 
 Preserve especialmente:
 

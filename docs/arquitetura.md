@@ -6,6 +6,14 @@ O projeto separa captura, descoberta, enriquecimento, geração de afiliado e pu
 
 `configuracao.py` concentra defaults, limites e parsing das opções operacionais compartilhadas. Segredos permanecem no `.env`; o módulo central lê apenas em runtime e oferece diagnóstico não sensível para evitar divergência entre monitor, publicador, Gate e alertas administrativos.
 
+## Fundação multicanal
+
+`distribuicao.py` introduz uma Outbox aditiva em `publicacoes.sqlite3`, sem substituir o fluxo Telegram nesta etapa. A tabela `deliveries` usa `destination + destination_account + surface` e armazena `external_id` como texto, permitindo que Telegram, Instagram, WhatsApp e futuras superfícies tenham estados independentes para a mesma oferta.
+
+Estados previstos: `PENDING`, `SENDING`, `SENT`, `RETRY`, `UNCERTAIN`, `FAILED` e `SKIPPED`. A Outbox possui enqueue, claim atômico, backoff e identidade por revisão. Enquanto a migração não for concluída, publicações Telegram confirmadas e envios incertos são apenas espelhados nessa tabela; `posts` continua sendo a barreira operacional de produção.
+
+A atribuição de afiliados também aceita destino. Shopee usa Sub ID específico por destino; KaBuM/Awin adiciona `clickref` por destino; Mercado Livre exige uma tag explícita própria para qualquer destino diferente de Telegram. Isso impede que tráfego de Instagram/WhatsApp seja contabilizado como Telegram.
+
 ## Telegram
 
 `monitor_ofertas.py` usa Telethon para:

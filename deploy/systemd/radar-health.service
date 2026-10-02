@@ -1,0 +1,13 @@
+[Unit]
+Description=Radar de Ofertas - Health Check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=radar
+Group=radar
+WorkingDirectory=/opt/radar
+ExecStart=/opt/radar/.venv/bin/python /opt/radar/radar_health.py --alert
+SuccessExitStatus=0 2
+UMask=0077

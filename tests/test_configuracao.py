@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from configuracao import (
+    DistributionConfig,
     GateConfig,
     MonitorConfig,
     PublisherConfig,
@@ -121,6 +122,20 @@ class ConfiguracaoTests(unittest.TestCase):
         self.assertEqual(cfg.admin_chat, "-1001")
         self.assertEqual(cfg.api_id, "123")
         self.assertEqual(cfg.api_hash, "hash")
+
+    def test_multicanal_fica_fechado_em_telegram_por_padrao(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                DistributionConfig.from_env().active_destinations,
+                ("telegram",),
+            )
+        with patch.dict(
+            os.environ, {"RADAR_DESTINOS_ATIVOS": "telegram,instagram"}, clear=True
+        ):
+            self.assertIn(
+                "destinos externos ainda não possuem adaptador ativo",
+                validate_operational_config(),
+            )
 
     def test_snapshot_expoe_estado_sem_expor_segredos(self):
         secret = "token-ultrassecreto"

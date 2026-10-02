@@ -67,6 +67,19 @@ class CouponTests(unittest.TestCase):
         self.assertEqual(len(ready['entries']), 1)
         self.assertEqual(ready['entries'][0]['affiliate_url'], 'https://s.shopee.com.br/meu')
 
+    def test_prepare_uses_destination_specific_coupon_affiliate(self):
+        client = Mock()
+        client.generate_coupon_link.return_value = 'https://s.shopee.com.br/meu'
+        with patch.object(
+            coupons, 'resolve_coupon',
+            return_value='https://shopee.com.br/m/cupons?voucherCode=OK'
+        ):
+            coupons.prepare_alert(client, alert(), publish_destination='instagram')
+        client.generate_coupon_link.assert_called_once_with(
+            'https://shopee.com.br/m/cupons?voucherCode=OK',
+            publish_destination='instagram',
+        )
+
     def test_product_coupon_code_does_not_turn_product_into_alert(self):
         self.assertEqual(coupons.coupon_entries([message('Notebook\nPor R$ 1000\nCupom: TESTE10\nhttps://s.shopee.com.br/teste')]), [])
 
