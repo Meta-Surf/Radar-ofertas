@@ -383,10 +383,21 @@ def caption(offer):
     return '\n\n'.join(parts)
 
 class Ledger:
+    RESERVATION_STALE_SECONDS = 600
+
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=30)
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS posts (product TEXT, day TEXT, status TEXT, message_id INTEGER, PRIMARY KEY(product, day))')
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(posts)')}
+        for name, kind in (
+            ('reserved_at', 'REAL'),
+            ('send_started_at', 'REAL'),
+            ('updated_at', 'REAL'),
+        ):
+            if name not in columns:
+                self.db.execute(f'ALTER TABLE posts ADD COLUMN {name} {kind}')
+        self.db.execute('CREATE INDEX IF NOT EXISTS posts_status_idx ON posts(status)')
         self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
         self.db.commit()
 
@@ -398,36 +409,103 @@ class Ledger:
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO publication_clock VALUES (?, ?)', (clock_id, time.time() + interval))
 
+    def reconcile_reservations(self):
+        """Recupera reservas do processo anterior sem arriscar duplicação."""
+        now = time.time()
+        with self.db:
+            uncertain = self.db.execute(
+                """UPDATE posts SET status='uncertain', updated_at=?
+                   WHERE status='sending'""",
+                (now,),
+            ).rowcount
+            # Em um novo processo protegido por instancia_unica, qualquer estado
+            # reserved pertence ao processo anterior e ainda não iniciou o envio.
+            released = self.db.execute(
+                "DELETE FROM posts WHERE status='reserved'"
+            ).rowcount
+        pending_uncertain = self.db.execute(
+            "SELECT COUNT(*) FROM posts WHERE status='uncertain'"
+        ).fetchone()[0]
+        return {
+            'moved_to_uncertain': uncertain,
+            'released_abandoned_reserved': released,
+            'uncertain_total': pending_uncertain,
+        }
+
     def reserve(self, product_id, moment=None, offer=None, channel=""):
         from inteligencia_ofertas import Intelligence
         intelligence = Intelligence(self.db)
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
-        # Serializa a verificação e a reserva entre processos concorrentes.
+        now = time.time()
+        cutoff = now - self.RESERVATION_STALE_SECONDS
+        # Serializa limpeza, verificação e reserva entre processos concorrentes.
         self.db.execute('BEGIN IMMEDIATE')
         try:
+            self.db.execute(
+                """DELETE FROM posts
+                   WHERE status='reserved'
+                     AND reserved_at IS NOT NULL AND reserved_at<?""",
+                (cutoff,),
+            )
             # O produto é identificado pelo par loja/item. Publicações anteriores
-            # só são liberadas com queda comparável após 24h; resultados incertos ficam bloqueados.
+            # só são liberadas com queda comparável após 24h; envios incertos ficam bloqueados
+            # até reconciliação explícita para evitar duplicatas.
             if self.db.execute('SELECT 1 FROM posts WHERE product=? LIMIT 1', (product_id,)).fetchone() and (
                     not offer or self.db.execute(
                         "SELECT 1 FROM posts WHERE product=? AND status!='sent'", (product_id,)).fetchone()
                     or not intelligence.can_repeat(offer, channel)):
                 self.db.commit()
                 return None
-            result = self.db.execute('INSERT OR IGNORE INTO posts VALUES (?, ?, ?, NULL)', (product_id, day, 'sending'))
+            result = self.db.execute(
+                """INSERT OR IGNORE INTO posts
+                   (product,day,status,message_id,reserved_at,send_started_at,updated_at)
+                   VALUES (?,?,?,NULL,?,NULL,?)""",
+                (product_id, day, 'reserved', now, now),
+            )
             self.db.commit()
         except BaseException:
             self.db.rollback()
             raise
         return day if result.rowcount else None
 
+    def mark_sending(self, product_id, day):
+        now = time.time()
+        with self.db:
+            result = self.db.execute(
+                """UPDATE posts
+                   SET status='sending', send_started_at=?, updated_at=?
+                   WHERE product=? AND day=? AND status='reserved'""",
+                (now, now, product_id, day),
+            )
+        return bool(result.rowcount)
+
+    def mark_uncertain(self, product_id, day):
+        now = time.time()
+        with self.db:
+            result = self.db.execute(
+                """UPDATE posts SET status='uncertain', updated_at=?
+                   WHERE product=? AND day=? AND status IN ('reserved','sending')""",
+                (now, product_id, day),
+            )
+        return bool(result.rowcount)
+
     def finish(self, product_id, day, message_id, offer=None, channel=""):
         from inteligencia_ofertas import Intelligence
         intelligence = Intelligence(self.db)
         with self.db:
-            self.db.execute('UPDATE posts SET status=?, message_id=? WHERE product=? AND day=?', ('sent', message_id, product_id, day))
+            self.db.execute(
+                """UPDATE posts SET status=?, message_id=?, updated_at=?
+                   WHERE product=? AND day=?""",
+                ('sent', message_id, time.time(), product_id, day),
+            )
             if offer and offer.get('kind') != 'coupon_alert':
                 intelligence.record(offer, channel, message_id)
 
     def release(self, product_id, day):
+        """Libera apenas estados cujo não-envio é conhecido; nunca remove uncertain."""
         with self.db:
-            self.db.execute('DELETE FROM posts WHERE product=? AND day=? AND status=?', (product_id, day, 'sending'))
+            self.db.execute(
+                """DELETE FROM posts
+                   WHERE product=? AND day=? AND status IN ('reserved','sending')""",
+                (product_id, day),
+            )

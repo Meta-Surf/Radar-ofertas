@@ -108,7 +108,7 @@ class IntelligenceTests(unittest.TestCase):
         with patch.object(Intelligence,'record',side_effect=RuntimeError('disk')):
             with self.assertRaises(RuntimeError):
                 self.ledger.finish(o['product_id'],day,1,offer=o,channel='@canal')
-        self.assertEqual(self.ledger.db.execute('SELECT status FROM posts').fetchone()[0],'sending')
+        self.assertEqual(self.ledger.db.execute('SELECT status FROM posts').fetchone()[0],'reserved')
 
     def test_repeat_only_lower_after_24h_and_never_uncertain(self):
         now=200*DAY

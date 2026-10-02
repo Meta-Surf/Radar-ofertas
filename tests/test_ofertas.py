@@ -100,6 +100,62 @@ class Tests(unittest.TestCase):
             c=Ledger(p)
             self.assertIsNone(c.reserve('x',moment))
             b.db.close(); c.db.close()
+    def test_reconcile_releases_reservation_that_never_started_sending(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'ledger.db'
+            a=Ledger(p)
+            day=a.reserve('x')
+            self.assertIsNotNone(day)
+            a.db.close()
+
+            b=Ledger(p)
+            result=b.reconcile_reservations()
+            self.assertEqual(result['released_abandoned_reserved'], 1)
+            self.assertEqual(result['moved_to_uncertain'], 0)
+            self.assertIsNotNone(b.reserve('x'))
+            b.db.close()
+
+    def test_reconcile_moves_interrupted_send_to_uncertain(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'ledger.db'
+            a=Ledger(p)
+            day=a.reserve('x')
+            self.assertTrue(a.mark_sending('x', day))
+            a.db.close()
+
+            b=Ledger(p)
+            result=b.reconcile_reservations()
+            self.assertEqual(result['moved_to_uncertain'], 1)
+            self.assertEqual(result['uncertain_total'], 1)
+            self.assertIsNone(b.reserve('x'))
+            status=b.db.execute(
+                "SELECT status FROM posts WHERE product='x'"
+            ).fetchone()[0]
+            self.assertEqual(status, 'uncertain')
+            b.db.close()
+
+    def test_uncertain_is_never_released_by_normal_release(self):
+        with tempfile.TemporaryDirectory() as d:
+            l=Ledger(Path(d)/'ledger.db')
+            day=l.reserve('x')
+            self.assertTrue(l.mark_sending('x', day))
+            self.assertTrue(l.mark_uncertain('x', day))
+            l.release('x', day)
+            self.assertEqual(
+                l.db.execute("SELECT status FROM posts WHERE product='x'").fetchone()[0],
+                'uncertain',
+            )
+            l.db.close()
+
+    def test_known_rejection_can_release_sending(self):
+        with tempfile.TemporaryDirectory() as d:
+            l=Ledger(Path(d)/'ledger.db')
+            day=l.reserve('x')
+            self.assertTrue(l.mark_sending('x', day))
+            l.release('x', day)
+            self.assertIsNotNone(l.reserve('x'))
+            l.db.close()
+
     def test_local_day(self):
         with tempfile.TemporaryDirectory() as d:
             l=Ledger(Path(d)/'ledger.db')

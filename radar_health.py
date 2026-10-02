@@ -62,6 +62,7 @@ def database_health():
         "ml_failures": {},
         "ml_quarantined": 0,
         "ml_circuit_seconds": 0,
+        "reservation_states": {},
         "last_publication": "",
     }
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
@@ -100,6 +101,17 @@ def database_health():
                 default=0,
             )
             result["ml_circuit_seconds"] = max(0, round(float(open_until) - time.time()))
+        except sqlite3.Error:
+            pass
+
+        try:
+            result["reservation_states"] = dict(
+                db.execute(
+                    """SELECT status,COUNT(*) FROM posts
+                       WHERE status IN ('reserved','sending','uncertain')
+                       GROUP BY status"""
+                )
+            )
         except sqlite3.Error:
             pass
 
@@ -167,6 +179,9 @@ def collect():
     elif backup["age_hours"] > 48:
         critical.append(f"backup geral antigo: {backup['age_hours']}h")
 
+    uncertain = int(db["reservation_states"].get("uncertain", 0))
+    if uncertain:
+        warnings.append(f"reservas com envio incerto: {uncertain}")
     if db["ml_circuit_seconds"] > 0:
         warnings.append(
             f"ML circuit breaker aberto por ~{db['ml_circuit_seconds']}s"
@@ -200,6 +215,15 @@ def render(report):
     lines.append(
         f"Fila radar: {db['queue_total']} | fontes: "
         + ", ".join(f"{k}={v}" for k, v in sorted(db["queue_sources"].items()))
+    )
+    reservation_states = db.get("reservation_states", {})
+    lines.append(
+        "Reservas: "
+        + ", ".join(
+            f"{name}={count}"
+            for name, count in sorted(reservation_states.items())
+        )
+        if reservation_states else "Reservas: nenhuma pendente"
     )
     lines.append(
         f"ML: quarentena={db['ml_quarantined']} | "

@@ -153,6 +153,20 @@ O monitor reprocessa por padrão mensagens recentes ao iniciar. A fila e o banco
 - filas locais e `imagens_ofertas/`;
 - histórico/cache KaBuM local quando desejar preservar a linha de base.
 
+### Reservas de publicação
+
+O ledger diferencia três estados antes da confirmação: `reserved` (reservado, envio ainda não iniciado), `sending` (requisição ao Telegram iniciada) e `uncertain` (resultado do envio não pôde ser confirmado). Ao reiniciar o publicador, reservas `reserved` abandonadas são liberadas com segurança; estados `sending` do processo anterior viram `uncertain` e permanecem bloqueados para evitar duplicação.
+
+Para listar ou reconciliar somente esses casos:
+
+```bash
+./.venv/bin/python reconciliar_reservas.py
+./.venv/bin/python reconciliar_reservas.py --nao-enviado "PRODUCT_ID" --dia YYYY-MM-DD
+./.venv/bin/python reconciliar_reservas.py --enviado "PRODUCT_ID" --dia YYYY-MM-DD --message-id 123
+```
+
+Nunca libere um `uncertain` sem conferir o canal quando houver dúvida sobre o resultado do envio. O diagnóstico `radar_health.py` também informa a quantidade desses estados.
+
 ## Testes
 
 ```powershell

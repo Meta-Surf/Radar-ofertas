@@ -299,7 +299,19 @@ cd /opt/radar
 ./.venv/bin/python radar_health.py --alert
 ```
 
-`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM e estado das credenciais.
+`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM, credenciais e reservas de publicação com resultado incerto.
+
+### Reconciliação de reservas
+
+O publicador grava `reserved` antes do envio, muda para `sending` imediatamente antes de chamar o Telegram e usa `uncertain` quando o resultado não pode ser confirmado. Em um reinício, `reserved` abandonadas são liberadas; `sending` do processo anterior viram `uncertain` para impedir duplicação.
+
+```bash
+./.venv/bin/python reconciliar_reservas.py
+./.venv/bin/python reconciliar_reservas.py --nao-enviado "PRODUCT_ID" --dia YYYY-MM-DD
+./.venv/bin/python reconciliar_reservas.py --enviado "PRODUCT_ID" --dia YYYY-MM-DD --message-id 123
+```
+
+A reconciliação é sempre explícita: `uncertain` nunca é apagado automaticamente.
 
 ## Dados locais que devem ser preservados
 

@@ -196,6 +196,16 @@ def run_publisher(args, parser):
     recovery_max_age = max(1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45')))
     max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
+    if not args.simular:
+        reservation_recovery = ledger.reconcile_reservations()
+        if (reservation_recovery['moved_to_uncertain']
+                or reservation_recovery['released_abandoned_reserved']):
+            print(
+                'Reservas recuperadas no início:',
+                reservation_recovery['released_abandoned_reserved'], 'pré-envio liberadas;',
+                reservation_recovery['moved_to_uncertain'], 'envios movidos para uncertain;',
+                reservation_recovery['uncertain_total'], 'uncertain no total.',
+            )
     metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
     from inteligencia_ofertas import Intelligence
     intelligence = Intelligence(ledger.db)
@@ -497,20 +507,25 @@ def run_publisher(args, parser):
                         print('\n', key, '\n', preview, '\n', '\n'.join(links), '\nImagem:', bool(image))
                         announced.add(key)
                     continue
+                sender = (ml_coupons.send_alert if is_ml_coupon
+                          else (kabum_coupons.send_alert if is_kabum_coupon
+                                else (send_alert if is_coupon else send)))
+                if not ledger.mark_sending(key, day):
+                    metrics.record_offer(offer, 'AGUARDANDO', 'RESERVA_INVALIDA')
+                    print('Reserva mudou antes do envio; publicação cancelada com segurança:', key)
+                    continue
                 try:
                     # Grava antes do envio: falha ou reinício não encurta a pausa.
                     if origin == 'radar':
                         ledger.mark_attempt(interval, clock_id=2)
                     elif is_recovered:
                         ledger.mark_attempt(recovery_interval, clock_id=4)
-                    sender = (ml_coupons.send_alert if is_ml_coupon
-                              else (kabum_coupons.send_alert if is_kabum_coupon
-                                    else (send_alert if is_coupon else send)))
                     message_id, wait = sender(token, channel, offer, image)
                 except Exception:
+                    ledger.mark_uncertain(key, day)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
-                    print('Envio com resultado incerto. Produto bloqueado no histórico:', key,
-                          '(Confira o canal; detalhes sensíveis foram omitidos.)')
+                    print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
+                          '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
                     break
                 if message_id is None:
                     ledger.release(key, day)
