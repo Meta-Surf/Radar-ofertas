@@ -20,7 +20,7 @@ Automação em Python para monitorar ofertas e cupons, gerar links próprios de 
 | Amazon | Integração Creators API implementada em modo fail-closed; aguarda Partner Tag e credenciais OAuth da conta de Associados |
 | Saúde operacional | `radar_health.py` verifica serviços, filas, backups, ML, estoque KaBuM, imagens temporárias e credenciais; na VPS roda a cada 5 min e alerta somente em mudança relevante |
 | Desempenho | Captura concorrente entre chats com ordem preservada por chat; cache curto de revalidação ML/Awin e limpeza automática de imagens temporárias |
-| Instagram e WhatsApp | Fundação multicanal pronta e fail-closed; adaptadores de publicação ainda não ativados |
+| Instagram e WhatsApp | Instagram em shadow/dry-run com candidatos reais e publicação externa bloqueada; WhatsApp ainda somente na fundação multicanal |
 
 O fluxo operacional atual é iniciado por `INICIAR_INTEGRADO.bat`.
 
@@ -84,9 +84,13 @@ Não execute outra instância do mesmo monitor, radar ou publicador em paralelo.
 
 ### Concorrência e cache
 
-O monitor não usa mais um lock global para todas as capturas. Eventos do mesmo chat continuam serializados para preservar ordem e deduplicação, enquanto chats diferentes podem ser processados em paralelo até `TG_CAPTURA_CONCORRENCIA` (padrão 4). O leitor público Mercado Livre reaproveita por até 60 segundos uma leitura forte recente no Gate e por até 5 minutos no enriquecimento assíncrono, sem reutilizar resultados quando preço/texto/imagem relevantes mudam. A revalidação da Offers API Awin também possui cache de 60 segundos para rajadas de cupons.
+O monitor não usa mais um lock global para todas as capturas. Eventos do mesmo chat continuam serializados para preservar ordem e deduplicação, enquanto chats diferentes podem ser processados em paralelo até `TG_CAPTURA_CONCORRENCIA` (padrão 4). O leitor público Mercado Livre reaproveita por até 60 segundos uma leitura forte recente no Gate e por até 5 minutos no enriquecimento assíncrono, sem reutilizar resultados quando preço/texto/imagem relevantes mudam. A revalidação da Offers API Awin também possui cache de 60 segundos para rajadas de cupons. `runtime_metrics.py` mede latência de captura, Gate e envio Telegram; o health resume p95 das últimas 24 horas.
 
 Imagens locais de ofertas ficam em `imagens_ofertas/`. A limpeza automática mantém qualquer arquivo ainda referenciado pelas filas e só remove arquivos não referenciados mais antigos que `IMAGENS_RETENCAO_HORAS` (24 h por padrão), no máximo a cada `IMAGENS_LIMPEZA_INTERVALO` segundos.
+
+### Shadow Instagram
+
+`RADAR_DESTINOS_SHADOW=instagram` ativa somente a geração de candidatos de Instagram após uma publicação Telegram confirmada. O adaptador `instagram_adapter.py` não possui cliente HTTP, token Meta ou rotina funcional de publicação; `publish()` falha deliberadamente. Links de afiliado do Telegram são removidos do payload shadow e ficam marcados como `DESTINATION_ATTRIBUTION_REQUIRED`. Os candidatos são persistidos em `delivery_shadow` para auditoria. `gerar_shadow_preintegracao.py` permite gerar amostras a partir de entregas Telegram confirmadas sem chamadas de rede. Os critérios de promoção para integração real estão em `docs/preintegracao.md`.
 
 ### Produção atual na VPS Linux
 
@@ -110,7 +114,7 @@ A normalização, defaults e limites das opções operacionais ficam centralizad
 
 Principais grupos de configuração:
 
-- Operação: `RADAR_INTERVALO_PUBLICACAO=1200`, `IDADE_MAXIMA_MINUTOS=120`, `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45`, `INTERVALO_RECUPERADAS=30`, `TG_RECUPERAR_MINUTOS=30`, `TG_RECUPERAR_MAX_MENSAGENS=500`, `TG_CAPTURA_CONCORRENCIA=4`, `IMAGENS_RETENCAO_HORAS=24`, `IMAGENS_LIMPEZA_INTERVALO=600` e `RADAR_DESTINOS_ATIVOS=telegram`;
+- Operação: `RADAR_INTERVALO_PUBLICACAO=1200`, `IDADE_MAXIMA_MINUTOS=120`, `IDADE_MAXIMA_RECUPERADAS_MINUTOS=45`, `INTERVALO_RECUPERADAS=30`, `TG_RECUPERAR_MINUTOS=30`, `TG_RECUPERAR_MAX_MENSAGENS=500`, `TG_CAPTURA_CONCORRENCIA=4`, `IMAGENS_RETENCAO_HORAS=24`, `IMAGENS_LIMPEZA_INTERVALO=600`, `RADAR_DESTINOS_ATIVOS=telegram` e `RADAR_DESTINOS_SHADOW=instagram`;
 - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CANAL`, `TG_API_ID`, `TG_API_HASH`, `TG_CHATS`, `TG_PAUSED_CHATS`, `TG_ESPELHO_CHATS`;
 - Shopee: `SHOPEE_APP_ID`, `SHOPEE_SECRET`, `SHOPEE_SUB_ID`;
 - Mercado Livre: OAuth para ferramentas de desenvolvimento e sessão do Link Builder para geração de afiliado;

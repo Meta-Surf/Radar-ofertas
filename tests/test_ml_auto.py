@@ -334,7 +334,7 @@ class AutoMLTests(unittest.TestCase):
                  patch.object(auto, 'AutoReader', return_value=reader), \
                  patch.object(publisher, 'send', return_value=(42, 0)) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=[None, KeyboardInterrupt]), \
-                 patch.dict(os.environ, {'TELEGRAM_TOKEN': 'fake', 'TELEGRAM_CANAL': '@fake', 'EXIGIR_IMAGEM': '1'}), \
+                 patch.dict(os.environ, {'TELEGRAM_TOKEN': 'fake', 'TELEGRAM_CANAL': '@fake', 'EXIGIR_IMAGEM': '1', 'RADAR_DESTINOS_SHADOW': 'instagram'}), \
                  redirect_stdout(io.StringIO()):
                 with self.assertRaises(KeyboardInterrupt):
                     publisher.run_publisher(SimpleNamespace(simular=False), Mock())
@@ -343,6 +343,11 @@ class AutoMLTests(unittest.TestCase):
                 self.assertEqual(send.call_args.args[3], IMAGE)
                 reader.read.assert_called_once()
                 reader.close.assert_called_once()
+                shadow_row = ledger.db.execute(
+                    "SELECT destination,state,source_external_id,payload FROM delivery_shadow"
+                ).fetchone()
+                self.assertEqual(shadow_row[:3], ('instagram', 'READY', '42'))
+                self.assertFalse(json.loads(shadow_row[3])['publish_enabled'])
             ledger.db.close()
 
     def test_user_product_page_format_supported(self):

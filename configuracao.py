@@ -209,11 +209,16 @@ class GateConfig:
 @dataclass(frozen=True)
 class DistributionConfig:
     active_destinations: tuple
+    shadow_destinations: tuple
 
     @classmethod
     def from_env(cls):
-        values = env_csv("RADAR_DESTINOS_ATIVOS", lower=True) or ("telegram",)
-        return cls(active_destinations=tuple(dict.fromkeys(values)))
+        active = env_csv("RADAR_DESTINOS_ATIVOS", lower=True) or ("telegram",)
+        shadow = env_csv("RADAR_DESTINOS_SHADOW", lower=True)
+        return cls(
+            active_destinations=tuple(dict.fromkeys(active)),
+            shadow_destinations=tuple(dict.fromkeys(shadow)),
+        )
 
 
 def operational_snapshot():
@@ -245,6 +250,7 @@ def operational_snapshot():
         },
         "distribution": {
             "active_destinations": distribution.active_destinations,
+            "shadow_destinations": distribution.shadow_destinations,
         },
         "telegram": {
             "channel_configured": bool(telegram.channel),
@@ -267,8 +273,13 @@ def validate_operational_config():
     unknown = [d for d in distribution.active_destinations if d not in supported]
     if unknown:
         problems.append("RADAR_DESTINOS_ATIVOS contém destino desconhecido")
+    shadow_unknown = [d for d in distribution.shadow_destinations if d not in supported]
+    if shadow_unknown:
+        problems.append("RADAR_DESTINOS_SHADOW contém destino desconhecido")
     if any(d != "telegram" for d in distribution.active_destinations):
         problems.append("destinos externos ainda não possuem adaptador ativo")
+    if "telegram" in distribution.shadow_destinations:
+        problems.append("telegram não deve ser configurado como destino shadow")
 
     if not telegram.token:
         problems.append("TELEGRAM_TOKEN ausente")

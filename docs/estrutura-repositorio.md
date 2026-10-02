@@ -21,6 +21,9 @@
 - `publisher_backoff.py` — backoff persistente do publicador.
 - `metricas_fontes.py` — métricas por origem.
 - `distribuicao.py` — Outbox/fundação de entregas multicanal.
+- `multicanal_shadow.py` — candidatos de novos destinos sem publicação externa.
+- `instagram_adapter.py` — adaptador Instagram estritamente dry-run/fail-closed.
+- `runtime_metrics.py` — métricas de latência dos caminhos críticos.
 - `limpeza_imagens.py` — retenção e remoção segura de imagens temporárias fora das filas.
 
 ## Integrações
@@ -39,7 +42,9 @@ Permanecem na raiz porque são comandos administrativos válidos:
 - `consultar_historico.py`;
 - `converter_link.py`;
 - `reconciliar_reservas.py`;
-- `relatorio_fontes.py`.
+- `relatorio_fontes.py`;
+- `gerar_shadow_preintegracao.py` — backfill seguro de candidatos shadow;
+- `validar_preintegracao.py` — carga/falhas locais sem rede.
 
 ## Testes
 

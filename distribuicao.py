@@ -105,7 +105,24 @@ class DeliveryOutbox:
                attempts,error_reason,payload,created_at,updated_at)
             VALUES (?,?,?,?,?,?,'PENDING',0,'',?,?,?)
             ON CONFLICT(product,destination,destination_account,surface,day)
-            DO UPDATE SET revision=excluded.revision,payload=excluded.payload,
+            DO UPDATE SET
+              state=CASE
+                WHEN deliveries.state IN ('FAILED','SKIPPED')
+                     AND deliveries.revision!=excluded.revision THEN 'PENDING'
+                ELSE deliveries.state END,
+              attempts=CASE
+                WHEN deliveries.state IN ('FAILED','SKIPPED')
+                     AND deliveries.revision!=excluded.revision THEN 0
+                ELSE deliveries.attempts END,
+              retry_at=CASE
+                WHEN deliveries.state IN ('FAILED','SKIPPED')
+                     AND deliveries.revision!=excluded.revision THEN NULL
+                ELSE deliveries.retry_at END,
+              error_reason=CASE
+                WHEN deliveries.state IN ('FAILED','SKIPPED')
+                     AND deliveries.revision!=excluded.revision THEN ''
+                ELSE deliveries.error_reason END,
+              revision=excluded.revision,payload=excluded.payload,
               updated_at=excluded.updated_at
             WHERE deliveries.state IN ('PENDING','RETRY','FAILED','SKIPPED')
         """, (str(product), destination, str(account or ""), str(surface or "default"),
@@ -135,6 +152,18 @@ class DeliveryOutbox:
         if commit:
             self.db.commit()
         return bool(result.rowcount)
+
+    def reconcile_stale_sending(self, *, stale_seconds=600, commit=True):
+        now = self.now()
+        cutoff = now - max(1, int(stale_seconds))
+        result = self.db.execute("""
+            UPDATE deliveries SET state='UNCERTAIN',retry_at=NULL,
+              error_reason='STALE_SENDING_AFTER_RESTART',updated_at=?
+            WHERE state='SENDING' AND sending_at IS NOT NULL AND sending_at<=?
+        """, (now, cutoff))
+        if commit:
+            self.db.commit()
+        return int(result.rowcount or 0)
 
     def record_sent(self, product, *, destination, account="", surface="default",
                     day, external_id, payload=None, commit=True):

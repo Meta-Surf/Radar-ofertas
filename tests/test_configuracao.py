@@ -136,16 +136,22 @@ class ConfiguracaoTests(unittest.TestCase):
 
     def test_multicanal_fica_fechado_em_telegram_por_padrao(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(
-                DistributionConfig.from_env().active_destinations,
-                ("telegram",),
-            )
+            cfg = DistributionConfig.from_env()
+            self.assertEqual(cfg.active_destinations, ("telegram",))
+            self.assertEqual(cfg.shadow_destinations, ())
         with patch.dict(
             os.environ, {"RADAR_DESTINOS_ATIVOS": "telegram,instagram"}, clear=True
         ):
             self.assertIn(
                 "destinos externos ainda não possuem adaptador ativo",
                 validate_operational_config(),
+            )
+        with patch.dict(
+            os.environ, {"RADAR_DESTINOS_SHADOW": "instagram"}, clear=True
+        ):
+            self.assertEqual(
+                DistributionConfig.from_env().shadow_destinations,
+                ("instagram",),
             )
 
     def test_snapshot_expoe_estado_sem_expor_segredos(self):

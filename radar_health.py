@@ -99,6 +99,8 @@ def database_health():
         "reservation_states": {},
         "publisher_backoff": {},
         "deliveries": {},
+        "shadow_deliveries": {},
+        "runtime_24h": {},
         "ml_affiliate_session": {
             "state": "unknown", "failures": 0, "retry_after": 0,
             "last_status": 0, "last_success": 0, "last_failure": 0,
@@ -194,6 +196,36 @@ def database_health():
                 "GROUP BY destination,state ORDER BY destination,state"
             ):
                 result["deliveries"].setdefault(destination, {})[state] = int(count)
+        except sqlite3.Error:
+            pass
+
+        try:
+            for destination, state, count in db.execute(
+                "SELECT destination,state,COUNT(*) FROM delivery_shadow "
+                "GROUP BY destination,state ORDER BY destination,state"
+            ):
+                result["shadow_deliveries"].setdefault(destination, {})[state] = int(count)
+        except sqlite3.Error:
+            pass
+
+        try:
+            metric_rows = db.execute(
+                """SELECT component,operation,duration_ms FROM runtime_metrics
+                   WHERE created_at>=? ORDER BY component,operation,duration_ms""",
+                (now - 86400,),
+            ).fetchall()
+            grouped = {}
+            for component, operation, duration in metric_rows:
+                grouped.setdefault((component, operation), []).append(float(duration))
+            for (component, operation), values in grouped.items():
+                count = len(values)
+                p95_index = max(0, min(count - 1, int((count - 1) * 0.95)))
+                result["runtime_24h"][f"{component}.{operation}"] = {
+                    "count": count,
+                    "avg_ms": round(sum(values) / count, 1),
+                    "p95_ms": round(values[p95_index], 1),
+                    "max_ms": round(values[-1], 1),
+                }
         except sqlite3.Error:
             pass
 
@@ -305,6 +337,21 @@ def collect():
         warnings.append("Amazon: Creators API aguardando credenciais")
     if images["size_mb"] > 1024:
         warnings.append(f"imagens temporárias acima de 1 GB: {images['size_mb']} MB")
+    for destination, states in db.get("shadow_deliveries", {}).items():
+        blocked = int(states.get("BLOCKED", 0))
+        if blocked:
+            warnings.append(f"shadow {destination}: {blocked} candidato(s) bloqueado(s)")
+    latency_limits = {
+        "monitor.capture": 5000,
+        "publisher.gate": 10000,
+        "publisher.telegram_send": 15000,
+    }
+    for name, limit in latency_limits.items():
+        metric = db.get("runtime_24h", {}).get(name, {})
+        if float(metric.get("p95_ms", 0) or 0) > limit:
+            warnings.append(
+                f"latência p95 alta em {name}: {metric.get('p95_ms')} ms"
+            )
 
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -347,6 +394,11 @@ def render(report):
             "Destinos ativos: "
             + ", ".join(distribution.get("active_destinations", ("telegram",)))
         )
+        shadow_destinations = distribution.get("shadow_destinations", ())
+        lines.append(
+            "Destinos shadow: "
+            + (", ".join(shadow_destinations) if shadow_destinations else "nenhum")
+        )
     db = report["database"]
     lines.append(
         f"Fila radar: {db['queue_total']} | fontes: "
@@ -386,6 +438,28 @@ def render(report):
         )
     else:
         lines.append("Entregas multicanal: schema pronto; sem entregas espelhadas")
+    shadow = db.get("shadow_deliveries", {})
+    if shadow:
+        lines.append(
+            "Shadow multicanal: " + "; ".join(
+                destination + "=" + ",".join(
+                    f"{state.lower()}:{count}" for state, count in sorted(states.items())
+                )
+                for destination, states in sorted(shadow.items())
+            )
+        )
+    else:
+        lines.append("Shadow multicanal: sem amostras")
+    runtime = db.get("runtime_24h", {})
+    if runtime:
+        lines.append(
+            "Latência 24h: " + "; ".join(
+                f"{name} p95={values.get('p95_ms', 0)}ms n={values.get('count', 0)}"
+                for name, values in sorted(runtime.items())
+            )
+        )
+    else:
+        lines.append("Latência 24h: aguardando amostras")
     retry_states = db.get("publisher_backoff", {})
     lines.append(
         "Backoff publicador: "

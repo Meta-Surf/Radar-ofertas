@@ -23,6 +23,7 @@ import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
 from fila_ofertas_sqlite import CapturedOfferQueue
 from limpeza_imagens import ImageJanitor
+from runtime_metrics import RuntimeMetrics
 from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int, secure_runtime_permissions
 
 BASE = Path(__file__).resolve().parent
@@ -245,6 +246,7 @@ async def main():
         sequential_updates=False,
     )
     captured_queue = None
+    runtime_metrics = None
     await client.start()
     try:
         dialogs = [d async for d in client.iter_dialogs() if d.is_group or d.is_channel]
@@ -303,6 +305,7 @@ async def main():
         recovery_state_path = BASE / 'monitor_recuperacao.json'
         recovery_state = load_monitor_state(recovery_state_path)
         metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
+        runtime_metrics = RuntimeMetrics(BASE / 'publicacoes.sqlite3')
 
         if args.diagnosticar:
             match = re.fullmatch(r'https://t\.me/([A-Za-z0-9_]+)/(\d+)/?', args.diagnosticar)
@@ -646,11 +649,24 @@ async def main():
                 if revisions.unchanged(key, digest):
                     remember_monitor_position(chat_id, messages)
                     return
-                await capture_once(
-                    messages, chat_id, chat, digest=digest, recovered=recovered
-                )
-                revisions.remember(key, digest)
-                remember_monitor_position(chat_id, messages)
+                started = time.perf_counter()
+                outcome = 'ok'
+                try:
+                    await capture_once(
+                        messages, chat_id, chat,
+                        digest=digest, recovered=recovered,
+                    )
+                    revisions.remember(key, digest)
+                    remember_monitor_position(chat_id, messages)
+                except Exception:
+                    outcome = 'error'
+                    raise
+                finally:
+                    runtime_metrics.record(
+                        'monitor', 'capture',
+                        (time.perf_counter() - started) * 1000,
+                        outcome=outcome,
+                    )
             return await capture_coordinator.run(chat_id, operation)
 
         async def recover_recent_messages():
@@ -732,6 +748,8 @@ async def main():
     finally:
         if captured_queue is not None:
             captured_queue.close()
+        if runtime_metrics is not None:
+            runtime_metrics.close()
         await client.disconnect()
 
 if __name__ == '__main__':

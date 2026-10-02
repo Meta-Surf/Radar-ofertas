@@ -99,6 +99,50 @@ class DeliveryOutboxTests(unittest.TestCase):
             ("SENDING", 1),
         )
 
+    def test_failed_delivery_only_reopens_for_new_revision(self):
+        offer = {"product_id": "P:rev", "price": "10,00"}
+        self.outbox.enqueue(
+            "P:rev", destination="instagram", account="perfil",
+            surface="feed", day="2026-10-02", payload=offer,
+        )
+        delivery_id = self.outbox.ready("instagram")[0][0]
+        self.assertTrue(self.outbox.claim(delivery_id))
+        self.assertTrue(self.outbox.fail(delivery_id, reason="permanent"))
+        self.outbox.enqueue(
+            "P:rev", destination="instagram", account="perfil",
+            surface="feed", day="2026-10-02", payload=offer,
+        )
+        self.assertEqual(self.outbox.ready("instagram"), [])
+        self.outbox.enqueue(
+            "P:rev", destination="instagram", account="perfil",
+            surface="feed", day="2026-10-02", payload=dict(offer, price="9,00"),
+        )
+        row = self.db.execute(
+            "SELECT state,attempts,error_reason FROM deliveries WHERE id=?",
+            (delivery_id,),
+        ).fetchone()
+        self.assertEqual(row, ("PENDING", 0, ""))
+        self.assertEqual(len(self.outbox.ready("instagram")), 1)
+
+    def test_stale_sending_becomes_uncertain_instead_of_duplicate_retry(self):
+        clock = [1000.0]
+        self.outbox.now = lambda: clock[0]
+        self.outbox.enqueue(
+            "P:crash", destination="instagram", account="perfil",
+            surface="feed", day="2026-10-02", payload={"product_id": "P:crash"},
+        )
+        delivery_id = self.outbox.ready("instagram")[0][0]
+        self.assertTrue(self.outbox.claim(delivery_id))
+        clock[0] = 1701.0
+        self.assertEqual(self.outbox.reconcile_stale_sending(stale_seconds=600), 1)
+        self.assertEqual(
+            self.db.execute(
+                "SELECT state,error_reason FROM deliveries WHERE id=?", (delivery_id,)
+            ).fetchone(),
+            ("UNCERTAIN", "STALE_SENDING_AFTER_RESTART"),
+        )
+        self.assertEqual(self.outbox.ready("instagram"), [])
+
     def test_outbox_claim_and_retry_are_destination_scoped(self):
         offer = {"product_id": "Shopee:9:9", "price": "19,90"}
         self.outbox.enqueue(

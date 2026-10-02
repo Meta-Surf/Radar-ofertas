@@ -14,6 +14,8 @@ Estados previstos: `PENDING`, `SENDING`, `SENT`, `RETRY`, `UNCERTAIN`, `FAILED` 
 
 A atribuição de afiliados também aceita destino. Shopee usa Sub ID específico por destino; KaBuM/Awin adiciona `clickref` por destino; Mercado Livre exige uma tag explícita própria para qualquer destino diferente de Telegram. Isso impede que tráfego de Instagram/WhatsApp seja contabilizado como Telegram.
 
+A pré-integração usa `RADAR_DESTINOS_SHADOW`. `multicanal_shadow.py` registra candidatos reais somente depois de uma entrega Telegram confirmada. `instagram_adapter.py` transforma o conteúdo para auditoria, remove qualquer link de afiliado Telegram e mantém `publish_enabled=false`; não existe chamada de rede Meta nesta fase. Estados `SENDING` antigos da Outbox real são reconciliados para `UNCERTAIN`, nunca para retry automático, evitando duplicação após crash.
+
 ## Desempenho e confiabilidade
 
 O monitor usa concorrência limitada entre chats (`TG_CAPTURA_CONCORRENCIA`, padrão 4), preservando serialização por chat. Assim, um redirecionador lento em uma fonte não bloqueia as demais, sem perder ordem de edições/álbuns da mesma origem.
@@ -22,7 +24,7 @@ O monitor usa concorrência limitada entre chats (`TG_CAPTURA_CONCORRENCIA`, pad
 
 `limpeza_imagens.py` remove somente imagens locais não referenciadas pelas filas e mais antigas que a retenção configurada. A limpeza é limitada e periódica para evitar varreduras a cada mensagem.
 
-`requirements.lock` fixa as versões validadas em produção/CI, enquanto `requirements.txt` mantém as faixas suportadas para upgrades deliberados.
+`requirements.lock` fixa as versões validadas em produção/CI, enquanto `requirements.txt` mantém as faixas suportadas para upgrades deliberados. `runtime_metrics.py` registra durações dos caminhos críticos e o health expõe contagem/p95 das últimas 24 horas. `validar_preintegracao.py` executa carga e cenários de falha somente em banco temporário, sem rede.
 
 ## Telegram
 

@@ -24,7 +24,10 @@ from telegram_api import TelegramSendError
 from publicacao_oferta import send_offer as send, valid_price
 from publisher_backoff import PublisherBackoff, offer_revision
 from fila_ofertas_sqlite import CapturedOfferQueue
-from configuracao import PublisherConfig, TelegramConfig, secure_runtime_permissions
+from multicanal_shadow import ShadowDistribution
+from runtime_metrics import RuntimeMetrics
+from configuracao import (DistributionConfig, PublisherConfig, TelegramConfig,
+                          secure_runtime_permissions)
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -121,6 +124,7 @@ def main():
 def run_publisher(args, parser):
     telegram = TelegramConfig.from_env()
     config = PublisherConfig.from_env()
+    distribution = DistributionConfig.from_env()
     token, channel = telegram.token, telegram.channel
     if not args.simular and (not token or not channel):
         parser.error('Preencha TELEGRAM_TOKEN e TELEGRAM_CANAL no .env.')
@@ -150,6 +154,8 @@ def run_publisher(args, parser):
     recovery_max_age = config.recovered_max_age_minutes
     max_age = config.offer_max_age_minutes
     ledger = Ledger(BASE / 'publicacoes.sqlite3')
+    shadow = ShadowDistribution(ledger.db)
+    runtime_metrics = RuntimeMetrics(ledger.db)
     if not args.simular:
         migrated_deliveries = ledger.deliveries.backfill_telegram_posts(channel)
         if migrated_deliveries:
@@ -497,10 +503,16 @@ def run_publisher(args, parser):
                           state['failures'], '| próxima em', state['delay'], 's')
                     continue
 
+                gate_started = time.perf_counter()
                 try:
                     offer = gate.validate(original_offer, offer, channel)
                     key = offer['product_id']
                 except GateReject as error:
+                    runtime_metrics.record(
+                        'publisher', 'gate',
+                        (time.perf_counter() - gate_started) * 1000,
+                        outcome='blocked:' + error.reason,
+                    )
                     state = 'REJEITADA' if error.discard else 'AGUARDANDO'
                     metrics.record_offer(offer, state, error.reason)
                     print(str(error), '| motivo:', error.reason)
@@ -516,6 +528,11 @@ def run_publisher(args, parser):
                         print('Gate reagendado:', source_key, '| tentativa:',
                               state['failures'], '| próxima em', state['delay'], 's')
                     continue
+                runtime_metrics.record(
+                    'publisher', 'gate',
+                    (time.perf_counter() - gate_started) * 1000,
+                    outcome='ok',
+                )
 
                 if not is_coupon and not is_mirror:
                     if offer.get('source') != 'kabum_feed':
@@ -570,6 +587,7 @@ def run_publisher(args, parser):
                     metrics.record_offer(offer, 'AGUARDANDO', 'RESERVA_INVALIDA')
                     print('Reserva mudou antes do envio; publicação cancelada com segurança:', key)
                     continue
+                send_started = time.perf_counter()
                 try:
                     # Grava antes do envio: falha ou reinício não encurta a pausa.
                     if origin == 'radar':
@@ -578,6 +596,11 @@ def run_publisher(args, parser):
                         ledger.mark_attempt(recovery_interval, clock_id=4)
                     message_id, _ = sender(token, channel, offer, image)
                 except TelegramSendError as error:
+                    runtime_metrics.record(
+                        'publisher', 'telegram_send',
+                        (time.perf_counter() - send_started) * 1000,
+                        outcome='error:' + error.kind,
+                    )
                     if error.kind == 'uncertain':
                         backoff.clear(source_key)
                         ledger.mark_uncertain(key, day, offer=offer, channel=channel)
@@ -622,13 +645,38 @@ def run_publisher(args, parser):
                           '| nova tentativa em', state['delay'], 's.')
                     continue
                 except Exception:
+                    runtime_metrics.record(
+                        'publisher', 'telegram_send',
+                        (time.perf_counter() - send_started) * 1000,
+                        outcome='error:unexpected',
+                    )
                     backoff.clear(source_key)
                     ledger.mark_uncertain(key, day, offer=offer, channel=channel)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
                     break
+                runtime_metrics.record(
+                    'publisher', 'telegram_send',
+                    (time.perf_counter() - send_started) * 1000,
+                    outcome='ok',
+                )
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                try:
+                    shadow_results = shadow.mirror_success(
+                        offer, day=day, source_external_id=message_id, image=image,
+                        destinations=distribution.shadow_destinations,
+                    )
+                    for destination, shadow_result in shadow_results.items():
+                        print(
+                            'Shadow', destination + ':', shadow_result.get('state'),
+                            '| publicação externa: desabilitada'
+                        )
+                except Exception as shadow_error:
+                    print(
+                        'Shadow multicanal falhou sem afetar Telegram:',
+                        type(shadow_error).__name__,
+                    )
                 captured_queue.discard_product(source_key)
                 backoff.clear(source_key)
                 if offer.get('source') == 'kabum_awin_coupon':
@@ -642,6 +690,7 @@ def run_publisher(args, parser):
     finally:
         captured_queue.close()
         auto_reader.close()
+        runtime_metrics.close()
 
 if __name__ == '__main__':
     try:
