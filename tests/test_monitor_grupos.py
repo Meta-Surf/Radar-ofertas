@@ -9,7 +9,7 @@ from ofertas_core import price_info, coupon_page_links, extract_links, caption
 from cupons_shopee import coupon_entries
 from fila_ofertas_sqlite import CapturedOfferQueue
 from monitor_ofertas import (CaptureRevisions, configured_chat_values,
-                             dialog_is_configured, resolve_for_capture)
+                             dialog_is_configured, offer_title, resolve_for_capture)
 
 EXAMPLE = '''🔥 Kit Ventoinha Pichau Ventus NX, ARGB, 5x120mm, Branco, PCH-VTNX5-WH01
 
@@ -47,6 +47,22 @@ class GroupMonitoringTests(unittest.TestCase):
         self.assertTrue(dialog_is_configured(dialog, paused))
         self.assertTrue(dialog_is_configured(dialog, {'@canalteste'}))
         self.assertFalse(dialog_is_configured(dialog, {'-1009999999999'}))
+
+    def test_offer_title_skips_price_link_and_call_to_action_lines(self):
+        text = '''R$ 2.713,08 no pix\nCupom: OFERTA10\nLink: https://s.shopee.com.br/abc\nNotebook Gamer Acer Nitro'''
+        self.assertEqual(offer_title(text), 'Notebook Gamer Acer Nitro')
+
+    def test_offer_title_uses_word_boundaries_for_call_to_action(self):
+        self.assertEqual(offer_title('Linksys Roteador Wi-Fi 6'), 'Linksys Roteador Wi-Fi 6')
+        self.assertEqual(offer_title('Compre agora\nSSD NVMe 1TB'), 'SSD NVMe 1TB')
+        self.assertEqual(offer_title('Resgate o cupom\nMonitor LG 34'), 'Monitor LG 34')
+
+    def test_mirror_title_still_skips_price_but_can_keep_original_cta_text(self):
+        text = 'R$ 99,90\nLink especial da loja\nProduto Espelho'
+        self.assertEqual(
+            offer_title(text, exclude_call_to_action=False),
+            'Link especial da loja',
+        )
 
     def test_actual_offer_price_condition_and_separate_coupon(self):
         msg = message()

@@ -95,6 +95,24 @@ def unresolved_metric_reason(reasons):
     return 'LINK_NAO_RESOLVIDO'
 
 
+_TITLE_NON_PRODUCT = re.compile(r'https?://|R\$|[💵💰💸]', re.I)
+_TITLE_CALL_TO_ACTION = re.compile(
+    r'\b(?:cupom|link|compre|resgate)\b', re.I
+)
+
+
+def offer_title(text, *, exclude_call_to_action=True):
+    """Escolhe uma linha de título sem confundir preço, link ou CTA com produto."""
+    for raw in str(text or '').splitlines():
+        line = re.sub(r'[*_`]', '', raw).strip()
+        if not line or _TITLE_NON_PRODUCT.search(line):
+            continue
+        if exclude_call_to_action and _TITLE_CALL_TO_ACTION.search(line):
+            continue
+        return line
+    return ''
+
+
 def exclusive_coupon_message(text, messages, shopee_alerts=None, ml_alert=None):
     """Só cria publicação própria de cupom quando a mensagem é dedicada a cupons.
 
@@ -483,8 +501,7 @@ async def main():
                 if photo:
                     image = await save_offer_photo(photo, chat_id)
                 captured_price = price_info(text) or {}
-                title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
-                title = next((line for line in title_lines if line and not re.search(r'https?://|R\\$|[💵💰💸]', line)), '')
+                title = offer_title(text, exclude_call_to_action=False)
                 row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
                        'kind': kind, 'publish_mode': 'mirror',
                        'mirror_template': mirror_template, 'mirror_button_text': mirror_button,
@@ -550,9 +567,7 @@ async def main():
                 if photo:
                     image = await save_offer_photo(photo, chat_id)
             captured_price = price_info(text) or {}
-            title_lines = [re.sub(r'[*_`]', '', line).strip() for line in text.splitlines()]
-            title = next((line for line in title_lines
-                          if line and not re.search(r'https?://|R\\$|[💵💰💸]|\\b(?:cupom|link|compre|resgate)\\b', line, re.I)), '')
+            title = offer_title(text)
             row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
                    'kind': kind,
                    'name': title[:160],
