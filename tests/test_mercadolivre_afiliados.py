@@ -4,6 +4,7 @@ from mercadolivre_afiliados import (
     ENDPOINT,
     LINKBUILDER,
     MercadoLivreAffiliate,
+    MercadoLivreSessionError,
     valid_affiliate_url,
 )
 from shopee_afiliados import AffiliateError
@@ -90,8 +91,9 @@ class MercadoLivreAffiliateTests(unittest.TestCase):
         client = self.client(
             Transport(post_response=Response(status=403)), refresh=False
         )
-        with self.assertRaisesRegex(AffiliateError, "Sessão de afiliado"):
+        with self.assertRaisesRegex(MercadoLivreSessionError, "Sessão de afiliado") as ctx:
             client.generate_link(URL)
+        self.assertEqual(ctx.exception.status, 403)
 
     def test_rejects_invalid_returned_destination(self):
         client = self.client(

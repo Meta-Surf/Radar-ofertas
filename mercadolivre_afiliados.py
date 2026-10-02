@@ -29,6 +29,12 @@ ML_HOSTS = {
 }
 
 
+class MercadoLivreSessionError(AffiliateError):
+    def __init__(self, status, message):
+        self.status = int(status or 0)
+        super().__init__(message)
+
+
 def valid_affiliate_url(url):
     if not isinstance(url, str):
         return False
@@ -170,7 +176,8 @@ class MercadoLivreAffiliate:
 
         status = int(getattr(response, "status_code", 0))
         if status in (401, 403):
-            raise AffiliateError(
+            raise MercadoLivreSessionError(
+                status,
                 "Sessão de afiliado Mercado Livre recusada. Atualize Cookie e X-CSRF-Token no .env."
             )
         if status == 429:

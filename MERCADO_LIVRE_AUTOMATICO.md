@@ -28,7 +28,9 @@ editadas. Ao reiniciar, o monitor pode reprocessar mensagens recentes conforme T
 
 - O endereço de afiliado original permanece no botão; não gera outro link.
 - Primeiro tenta ler a página por HTTP. Se necessário, tenta um navegador com
-  JavaScript. Não usa sua sessão pessoal nem automatiza login, captcha ou compra.
+  JavaScript. Nunca reutiliza `ML_AFFILIATE_COOKIE`. Por padrão opera anonimamente;
+  `ML_READER_COOKIE` é opcional e deve ser uma sessão separada. Não automatiza
+  login, captcha ou compra.
 - A consulta roda em segundo plano: os demais grupos continuam publicando.
 - Usa um único produto e uma única oferta explícita em BRL, disponível para compra,
   com imagem ML. Não usa parcela, preço riscado, lowPrice ou estimativa de cupom.
@@ -51,9 +53,10 @@ Não grava fila e não envia ao Telegram. Esse teste não é necessário a cada 
 
 ## Validação e limites desta entrega
 
-158 testes locais aprovados com dados sintéticos e rede simulada, incluindo o
-encadeamento captura, complementação, publicação, preservação de links e execução
-em segundo plano. Nenhuma publicação real foi feita.
+A suíte automatizada cobre dados sintéticos e rede simulada, incluindo captura,
+complementação, publicação, preservação de links, isolamento da sessão de afiliados
+e execução em segundo plano. A validação automatizada não substitui testes reais de
+autenticação/disponibilidade externa.
 
 O link 2wpg8CQ retornou HTTP 403 neste ambiente. O download do navegador de teste
 retornou um arquivo inválido, impedindo validar a navegação real aqui. Portanto,

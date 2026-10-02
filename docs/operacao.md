@@ -240,7 +240,7 @@ O monitor identifica o produto, a leitura automática pode completar campos ause
 
 Nunca use parcela como preço total. Se título/preço/imagem/produto não puderem ser confirmados dentro das regras atuais, a oferta fica pendente ou é bloqueada.
 
-A leitura pública usa `mercadolivre_resiliencia.py`: falhas recebem backoff persistente; links com falhas repetidas entram em quarentena; e 5 respostas HTTP 403 distintas em até 5 minutos abrem um circuit breaker de 15 minutos. Isso evita repetir Playwright/HTTP contra páginas que o Mercado Livre está bloqueando.
+A leitura pública usa `mercadolivre_resiliencia.py`: falhas recebem backoff persistente; links com falhas repetidas entram em quarentena; e 5 respostas HTTP 403 distintas em até 5 minutos abrem um circuit breaker de 15 minutos. Ela não reutiliza a sessão de afiliados: `ML_READER_COOKIE` é opcional e separado; vazio significa leitura anônima.
 
 ### Grupo manual
 
@@ -259,7 +259,15 @@ ML_AFFILIATE_COOKIE=
 ML_AFFILIATE_CSRF=
 ML_AFFILIATE_TAG=
 ML_AFFILIATE_REFRESH_COOKIES=1
+ML_READER_COOKIE=
+ML_READER_USER_AGENT=
 ```
+
+`ML_READER_COOKIE` é opcional e nunca deve ser confundido com `ML_AFFILIATE_COOKIE`.
+Respostas 401/403 do Link Builder abrem um circuit breaker exclusivo do ML automático
+(15 min, depois 1h, 4h e teto de 6h). O estado fica em `publicacoes.sqlite3`; uma
+mudança de Cookie/CSRF invalida o bloqueio antigo por fingerprint. Se
+`TELEGRAM_ADMIN_CHAT` estiver configurado, a primeira expiração envia alerta privado.
 
 Esses valores não pertencem ao GitHub.
 
@@ -299,7 +307,7 @@ cd /opt/radar
 ./.venv/bin/python radar_health.py --alert
 ```
 
-`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM, credenciais, reservas de publicação com resultado incerto e backoffs ativos do publicador.
+`--alert` só envia quando `TELEGRAM_ADMIN_CHAT` estiver configurado. O script verifica serviços, filas, backups, ML, cobertura de estoque KaBuM, credenciais, reservas de publicação com resultado incerto, backoffs ativos do publicador e o estado da sessão de afiliados ML. A expiração 401/403 também tenta alertar o administrador imediatamente, sem publicar esse aviso no canal público.
 
 ### Backoff do publicador
 

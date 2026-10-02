@@ -137,7 +137,9 @@ Há três fluxos distintos:
 - grupo manual: preserva o link que o operador já inseriu como seu próprio link;
 - listas exclusivas de cupons: usam a arte própria e o texto padrão do projeto.
 
-A leitura pública automática usa backoff persistente, quarentena por link e circuit breaker para sequências de HTTP 403, evitando martelar páginas que o Mercado Livre está bloqueando.
+A sessão de afiliados do Link Builder possui saúde própria em SQLite: respostas 401/403 abrem circuit breaker apenas para o ML automático, registram o estado no `radar_health.py` e podem disparar alerta privado via `TELEGRAM_ADMIN_CHAT`. Mudança real de Cookie/CSRF é detectada por fingerprint e libera nova tentativa imediatamente após reinício.
+
+A leitura pública automática é separada da sessão sensível de afiliados. Ela usa `ML_READER_COOKIE` opcional; quando vazio, HTTP/Playwright operam anonimamente e nunca reutilizam `ML_AFFILIATE_COOKIE`. A leitura pública também mantém backoff persistente, quarentena por link e circuit breaker próprios para sequências de HTTP 403.
 
 Consulte [MERCADO_LIVRE_AFILIADOS.md](MERCADO_LIVRE_AFILIADOS.md), [MERCADO_LIVRE_AUTOMATICO.md](MERCADO_LIVRE_AUTOMATICO.md) e [PUBLICADOR_MERCADO_LIVRE.md](PUBLICADOR_MERCADO_LIVRE.md).
 

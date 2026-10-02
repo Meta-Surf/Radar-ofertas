@@ -10,7 +10,8 @@ import requests
 from dotenv import load_dotenv
 from ofertas_core import Ledger, caption, product, price_info
 from shopee_afiliados import ShopeeAffiliate, AffiliateError, valid_affiliate_url
-from mercadolivre_afiliados import MercadoLivreAffiliate, valid_affiliate_url as valid_ml_affiliate_url
+from mercadolivre_afiliados import MercadoLivreAffiliate, MercadoLivreSessionError, valid_affiliate_url as valid_ml_affiliate_url
+from mercadolivre_session_health import MLAffiliateSessionHealth, credential_fingerprint
 from kabum_afiliados import KabumAffiliate, valid_affiliate_url as valid_kabum_affiliate_url
 from amazon_afiliados import AmazonCreators
 from cupons_shopee import prepare_alert, alert_caption, banner_path, send_alert
@@ -203,6 +204,13 @@ def run_publisher(args, parser):
     metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
     backoff = PublisherBackoff(ledger.db, enabled=not args.simular)
     backoff.prune()
+    ml_session_health = None
+    ml_session_fingerprint = ''
+    if ml_affiliate is not None and not args.simular:
+        ml_session_health = MLAffiliateSessionHealth(ledger.db)
+        ml_session_fingerprint = credential_fingerprint(
+            ml_affiliate.cookie, ml_affiliate.csrf, ml_affiliate.tag
+        )
     from inteligencia_ofertas import Intelligence
     intelligence = Intelligence(ledger.db)
     announced = set()
@@ -325,6 +333,23 @@ def run_publisher(args, parser):
                         gate_blocked[source_key] = revision
                         continue
 
+                if (is_ml_offer or is_ml_pending) and ml_session_health is not None:
+                    can_try_affiliate, session_state = ml_session_health.can_try(
+                        ml_session_fingerprint
+                    )
+                    if not can_try_affiliate:
+                        marker = ('ml_afiliado_sessao', session_state.get('last_status'))
+                        if marker not in announced:
+                            print(
+                                'Sessão de afiliados ML em circuit breaker; ofertas automáticas aguardando |',
+                                'nova tentativa em', session_state['retry_after'], 's'
+                            )
+                            announced.add(marker)
+                        metrics.record_offer(
+                            offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO_BLOQUEADA'
+                        )
+                        continue
+
                 if is_ml_manual or is_ml_offer or is_ml_pending:
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
                         metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
@@ -444,6 +469,8 @@ def run_publisher(args, parser):
                             offer = ml_manual.prepare(offer)
                         elif is_ml_offer:
                             offer = ml_affiliate.prepare(offer)
+                            if ml_session_health is not None:
+                                ml_session_health.success(ml_session_fingerprint)
                         elif offer.get('store') == 'KaBuM':
                             offer = kabum_affiliate.prepare(offer)
                         elif offer.get('store') == 'Amazon':
@@ -457,6 +484,29 @@ def run_publisher(args, parser):
                         from radar_shopee_continuo import pertence_ao_tema
                         if not pertence_ao_tema(theme, offer):
                             raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
+                except MercadoLivreSessionError as e:
+                    if day:
+                        ledger.release(key, day)
+                    if ml_affiliate is not None:
+                        ml_affiliate.cache.clear()
+                    session_state = (
+                        ml_session_health.failure(
+                            ml_session_fingerprint, e.status, str(e)
+                        )
+                        if ml_session_health is not None
+                        else {'retry_after': 900, 'failures': 1, 'alert_sent': False}
+                    )
+                    metrics.record_offer(
+                        offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO'
+                    )
+                    print(
+                        'Sessão de afiliados Mercado Livre recusada | HTTP',
+                        e.status, '| tentativa:', session_state['failures'],
+                        '| circuit breaker:', session_state['retry_after'], 's',
+                        '| alerta admin:',
+                        'enviado' if session_state['alert_sent'] else 'não enviado',
+                    )
+                    continue
                 except AffiliateError as e:
                     if day:
                         ledger.release(key, day)

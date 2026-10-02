@@ -24,6 +24,11 @@ class RadarHealthTests(unittest.TestCase):
                 "ml_failures": {"ML_HTTP_403": 1},
                 "reservation_states": {"uncertain": 2},
                 "publisher_backoff": {"SEM_IMAGEM": 3, "TELEGRAM_TRANSITORIO": 1},
+                "ml_affiliate_session": {
+                    "state": "invalid", "failures": 2, "retry_after": 900,
+                    "last_status": 403, "last_success": 0,
+                    "last_failure": 123, "alert_sent": False,
+                },
             },
             "kabum_stock": {"known_stock": 0, "products": 100, "coverage_pct": 0.0},
             "integrations": {
@@ -42,6 +47,8 @@ class RadarHealthTests(unittest.TestCase):
         self.assertIn("Reservas: uncertain=2", text)
         self.assertIn("Backoff publicador:", text)
         self.assertIn("SEM_IMAGEM=3", text)
+        self.assertIn("ML afiliados: sessão=invalid", text)
+        self.assertIn("HTTP=403", text)
         self.assertIn("amazon_creators=PENDENTE", text)
         self.assertIn("KaBuM estoque: 0/100", text)
 

@@ -182,6 +182,64 @@ class IntegrationTests(unittest.TestCase):
             send_again.assert_not_called()
             ledger.db.close()
 
+    def test_ml_affiliate_403_opens_its_circuit_without_blocking_shopee(self):
+        from mercadolivre_afiliados import MercadoLivreSessionError
+
+        now = datetime.now(timezone.utc).isoformat()
+        ml_offer = dict(
+            kind='ml_offer', source='telegram', store='Mercado Livre',
+            product_id='MercadoLivre:4360643061',
+            url='https://produto.mercadolivre.com.br/MLB-4360643061-_JM',
+            name='Produto ML', price='199,90', source_date=now,
+        )
+        shopee_offer = dict(
+            product_id='Shopee:8:88',
+            url='https://shopee.com.br/product/8/88',
+            price='89,90', source='telegram', source_date=now,
+        )
+        ml_client = Mock()
+        ml_client.cookie = 'ssid=session-value-123456789'
+        ml_client.csrf = 'csrf-token-123456'
+        ml_client.tag = 'tag'
+        ml_client.cache = {}
+        ml_client.prepare.side_effect = MercadoLivreSessionError(
+            403, 'Sessão de afiliado Mercado Livre recusada.'
+        )
+        shopee = Mock()
+        shopee.prepare.side_effect = lambda o: dict(
+            o, store='Shopee', affiliate_url='https://s.shopee.com.br/gateok',
+            affiliate_generated=True, price_from=False,
+        )
+        reader = Mock()
+        reader.close = Mock()
+
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Ledger(Path(d) / 'posts.db')
+            with patch.object(publisher, 'Ledger', return_value=ledger), \
+                 patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=shopee), \
+                 patch.object(publisher.MercadoLivreAffiliate, 'from_env', return_value=ml_client), \
+                 patch.object(publisher, 'rows', return_value=iter([ml_offer, shopee_offer])), \
+                 patch('mercadolivre_auto.AutoReader', return_value=reader), \
+                 patch.object(publisher, 'send', return_value=(811, 0)) as send, \
+                 patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
+                 patch.dict('os.environ', {
+                     'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake',
+                     'TELEGRAM_ADMIN_CHAT':'', 'EXIGIR_IMAGEM':'0',
+                 }), \
+                 patch('builtins.print'):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.run_publisher(SimpleNamespace(simular=False), Mock())
+
+            send.assert_called_once()
+            self.assertEqual(send.call_args.args[2]['product_id'], 'Shopee:8:88')
+            state = ledger.db.execute(
+                """SELECT state,failures,last_status,blocked_until
+                   FROM ml_affiliate_session_health WHERE id=1"""
+            ).fetchone()
+            self.assertEqual(state[:3], ('invalid', 1, 403))
+            self.assertGreater(state[3], 0)
+            ledger.db.close()
+
     def test_telegram_429_pauses_global_queue(self):
         from telegram_api import TelegramSendError
 

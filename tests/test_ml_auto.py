@@ -108,7 +108,7 @@ class AutoMLTests(unittest.TestCase):
         transport = Mock()
         transport.get.side_effect = [response(302, headers={'Location': redirected}),
                                      response(text=document())]
-        with patch.dict(os.environ, {'ML_AFFILIATE_COOKIE': 'foo=bar; session=abc123'}):
+        with patch.dict(os.environ, {'ML_READER_COOKIE': 'foo=bar; session=abc123'}, clear=False):
             self.assertEqual(auto.fetch_http(URL, transport)['price'], '199,90')
         self.assertIn('Cookie', transport.get.call_args.kwargs['headers'])
 
@@ -125,11 +125,29 @@ class AutoMLTests(unittest.TestCase):
         session = Mock()
         session.cookies = Mock()
         with patch.object(auto.requests, 'Session', return_value=session), \
-             patch.dict(os.environ, {'ML_AFFILIATE_COOKIE': 'foo=bar; session=abc123'}):
+             patch.dict(os.environ, {'ML_READER_COOKIE': 'foo=bar; session=abc123'}, clear=False):
             result = auto.http_transport()
         self.assertIs(result, session)
         session.cookies.set.assert_any_call('foo', 'bar')
         session.cookies.set.assert_any_call('session', 'abc123')
+
+    def test_reader_never_reuses_affiliate_cookie(self):
+        with patch.dict(
+            os.environ,
+            {
+                'ML_AFFILIATE_COOKIE': 'sensitive=affiliate-secret',
+                'ML_READER_COOKIE': '',
+            },
+            clear=False,
+        ):
+            headers = auto.request_headers()
+            self.assertNotIn('Cookie', headers)
+
+            session = Mock()
+            session.cookies = Mock()
+            with patch.object(auto.requests, 'Session', return_value=session):
+                auto.http_transport()
+            session.cookies.set.assert_not_called()
 
     def test_social_profile_uses_only_unique_featured_product_cta(self):
         social = 'https://www.mercadolivre.com.br/social/bebidastaio'

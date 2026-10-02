@@ -64,6 +64,11 @@ def database_health():
         "ml_circuit_seconds": 0,
         "reservation_states": {},
         "publisher_backoff": {},
+        "ml_affiliate_session": {
+            "state": "unknown", "failures": 0, "retry_after": 0,
+            "last_status": 0, "last_success": 0, "last_failure": 0,
+            "alert_sent": False,
+        },
         "last_publication": "",
     }
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
@@ -124,6 +129,25 @@ def database_health():
                     (time.time(),),
                 )
             )
+        except sqlite3.Error:
+            pass
+
+        try:
+            row = db.execute(
+                """SELECT state,failures,blocked_until,last_status,
+                          last_success,last_failure,alert_sent
+                   FROM ml_affiliate_session_health WHERE id=1"""
+            ).fetchone()
+            if row:
+                result["ml_affiliate_session"] = {
+                    "state": row[0],
+                    "failures": int(row[1]),
+                    "retry_after": max(0, int(float(row[2]) - time.time() + 0.999)),
+                    "last_status": int(row[3]),
+                    "last_success": float(row[4]),
+                    "last_failure": float(row[5]),
+                    "alert_sent": bool(row[6]),
+                }
         except sqlite3.Error:
             pass
 
@@ -194,6 +218,15 @@ def collect():
     uncertain = int(db["reservation_states"].get("uncertain", 0))
     if uncertain:
         warnings.append(f"reservas com envio incerto: {uncertain}")
+    ml_affiliate_session = db.get("ml_affiliate_session", {})
+    if ml_affiliate_session.get("state") == "invalid":
+        warnings.append(
+            "ML afiliados: sessão inválida"
+            f" (HTTP {ml_affiliate_session.get('last_status', 0)},"
+            f" retry ~{ml_affiliate_session.get('retry_after', 0)}s)"
+        )
+        if not ml_affiliate_session.get("alert_sent"):
+            warnings.append("ML afiliados: alerta administrativo ainda não entregue")
     if db["ml_circuit_seconds"] > 0:
         warnings.append(
             f"ML circuit breaker aberto por ~{db['ml_circuit_seconds']}s"
@@ -245,8 +278,22 @@ def render(report):
         )
         if retry_states else "Backoff publicador: nenhum ativo"
     )
+    ml_session = db.get("ml_affiliate_session", {})
+    ml_session_state = ml_session.get("state", "unknown")
+    alert_state = (
+        ("OK" if ml_session.get("alert_sent") else "PENDENTE")
+        if ml_session_state == "invalid" else "n/a"
+    )
     lines.append(
-        f"ML: quarentena={db['ml_quarantined']} | "
+        "ML afiliados: "
+        f"sessão={ml_session_state} | "
+        f"falhas={ml_session.get('failures', 0)} | "
+        f"retry={ml_session.get('retry_after', 0)}s | "
+        f"HTTP={ml_session.get('last_status', 0)} | "
+        f"alerta={alert_state}"
+    )
+    lines.append(
+        f"ML leitura pública: quarentena={db['ml_quarantined']} | "
         f"circuit={db['ml_circuit_seconds']}s | falhas={db['ml_failures']}"
     )
     stock = report["kabum_stock"]

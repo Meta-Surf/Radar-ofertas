@@ -42,9 +42,16 @@ https://meli.la/...
 Nada foi publicado no Telegram.
 ```
 
-401/403 indica sessão/CSRF recusados. 429 indica limitação temporária. Em todos esses
-casos a publicação automática fica bloqueada; não existe fallback para link comum ou
-link de afiliado de terceiros.
+401/403 indica sessão/CSRF recusados. O publicador registra o incidente em
+`ml_affiliate_session_health`, abre um circuit breaker exclusivo do afiliado ML e
+mantém Shopee, KaBuM, cupons e o fluxo manual independentes. A espera começa em
+15 minutos e cresce em falhas sucessivas. Uma mudança de Cookie/CSRF gera uma nova
+fingerprint e permite testar a sessão nova imediatamente após reiniciar o publicador.
+
+Quando `TELEGRAM_ADMIN_CHAT` estiver configurado, a primeira expiração da sessão
+envia um alerta privado e a recuperação pode enviar uma confirmação. 429 continua
+sendo tratado como limitação temporária. Não existe fallback para link comum ou link
+de afiliado de terceiros.
 
 ## Fluxos
 
@@ -69,7 +76,11 @@ Fluxo:
 Antes de gerar o link, o módulo visita o Link Builder com o Cookie atual e mescla
 cookies renovados devolvidos pelo servidor. Isso reduz renovações manuais, mas não
 elimina a expiração da sessão principal. Quando houver 401/403, atualize Cookie e
-X-CSRF-Token pelo navegador.
+X-CSRF-Token pelo navegador e reinicie o publicador. O circuit breaker percebe a
+nova fingerprint e não exige aguardar o bloqueio antigo expirar.
+
+A leitura pública não recebe esse Cookie. Se algum dia for necessária uma sessão
+separada apenas para leitura, use `ML_READER_COOKIE`; vazio significa leitura anônima.
 
 ## Limites
 

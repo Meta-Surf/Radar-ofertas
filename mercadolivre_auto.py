@@ -21,14 +21,21 @@ DEFAULT_USER_AGENT = (
 )
 
 
+def reader_cookie():
+    value = os.getenv('ML_READER_COOKIE', '').strip()
+    if value and '\r' not in value and '\n' not in value and len(value) <= 100000:
+        return value
+    return ''
+
+
 def request_headers():
     headers = {
-        'User-Agent': os.getenv('ML_AFFILIATE_USER_AGENT', DEFAULT_USER_AGENT),
+        'User-Agent': os.getenv('ML_READER_USER_AGENT', DEFAULT_USER_AGENT),
         'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     }
-    cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
-    if cookie and '\r' not in cookie and '\n' not in cookie and len(cookie) <= 100000:
+    cookie = reader_cookie()
+    if cookie:
         headers['Cookie'] = cookie
     return headers
 
@@ -266,7 +273,7 @@ def http_transport(transport=None):
     if transport is not None:
         return transport
     session = requests.Session()
-    cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+    cookie = reader_cookie()
     for piece in cookie.split(';'):
         if '=' not in piece:
             continue
@@ -571,10 +578,10 @@ def fetch_browser(url):
             try:
                 context = browser.new_context(
                     locale='pt-BR', accept_downloads=False, service_workers='block',
-                    user_agent=os.getenv('ML_AFFILIATE_USER_AGENT', DEFAULT_USER_AGENT),
+                    user_agent=os.getenv('ML_READER_USER_AGENT', DEFAULT_USER_AGENT),
                     extra_http_headers={'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'},
                 )
-                cookie = os.getenv('ML_AFFILIATE_COOKIE', '').strip()
+                cookie = reader_cookie()
                 if cookie:
                     browser_cookies = []
                     for piece in cookie.split(';'):
