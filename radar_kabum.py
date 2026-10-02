@@ -24,6 +24,7 @@ import sqlite3
 import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from decimal import Decimal, InvalidOperation
@@ -149,6 +150,23 @@ def _pick(row, *aliases):
         if value:
             return value
     return ""
+
+
+def _secure_image_url(row):
+    """Prefere imagem HTTPS; URLs HTTP oficiais da KaBuM são promovidas para HTTPS."""
+    fallback = ""
+    for key in ("large_image", "merchant_image_url", "aw_image_url"):
+        value = str(row.get(key) or "").strip()
+        if not value:
+            continue
+        if value.startswith("https://"):
+            return value
+        if value.startswith("http://"):
+            host = (urllib.parse.urlsplit(value).hostname or "").lower()
+            if host == "kabum.com.br" or host.endswith(".kabum.com.br"):
+                return "https://" + value[len("http://"):]
+            fallback = fallback or value
+    return fallback
 
 
 def find_product_url_in_feed_list(raw: bytes):
@@ -512,12 +530,7 @@ def ingest(raw: bytes, db, return_changed_ids=False):
                     ).strip(),
                     price,
                     link,
-                    (
-                        row.get("large_image")
-                        or row.get("merchant_image_url")
-                        or row.get("aw_image_url")
-                        or ""
-                    ).strip(),
+                    _secure_image_url(row),
                     (row.get("in_stock") or row.get("stock_status") or "").strip(),
                     now,
                     json.dumps(row, ensure_ascii=False),

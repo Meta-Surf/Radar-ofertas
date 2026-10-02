@@ -121,6 +121,7 @@ Implementado em 01/10/2026 com publicação pela fila unificada.
 - JBL, NVIDIA e AMD recebem prioridade adicional;
 - categorias de acessórios como suportes/cabos/adaptadores não recebem bônus por palavras como TV/notebook;
 - estoque explicitamente indisponível é bloqueado; estoque vazio é tratado como desconhecido, nunca como confirmação;
+- imagens do Product Feed são normalizadas para HTTPS; URLs oficiais `*.kabum.com.br` que ainda chegam em HTTP são promovidas para HTTPS antes de entrar na fila, evitando bloqueio `SEM_IMAGEM`;
 - `publicacoes.sqlite3` controla deduplicação e republicação apenas com preço menor após 24h;
 - ofertas dos grupos continuam com prioridade sobre as ofertas automáticas;
 - o publicador central aplica o intervalo do radar também à KaBuM.

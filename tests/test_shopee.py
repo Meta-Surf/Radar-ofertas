@@ -5,7 +5,7 @@ import json
 import os
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 from shopee_afiliados import ShopeeAffiliate, AffiliateError
@@ -86,7 +86,7 @@ class AffiliateTests(unittest.TestCase):
         from ofertas_core import Ledger
         ledger=Ledger(':memory:')
         client=Mock(); client.prepare.side_effect=AffiliateError('API recusada')
-        with patch.dict(os.environ,{'TELEGRAM_TOKEN':'fake','TELEGRAM_CANAL':'@teste'}), patch.object(sys,'argv',['bot.py']), patch.object(p,'rows',return_value=iter([offer])), patch.object(p,'Ledger',return_value=ledger), patch.object(p.ShopeeAffiliate,'from_env',return_value=client), patch.object(p,'send') as send, patch.object(p.time,'sleep',side_effect=KeyboardInterrupt), redirect_stdout(io.StringIO()):
+        with patch.dict(os.environ,{'TELEGRAM_TOKEN':'fake','TELEGRAM_CANAL':'@teste'}), patch.object(sys,'argv',['bot.py']), patch('execucao_unica.instancia_unica',return_value=nullcontext()), patch.object(p,'rows',return_value=iter([offer])), patch.object(p,'Ledger',return_value=ledger), patch.object(p.ShopeeAffiliate,'from_env',return_value=client), patch.object(p,'send') as send, patch.object(p.time,'sleep',side_effect=KeyboardInterrupt), redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
                 p.main()
             send.assert_not_called()

@@ -61,6 +61,29 @@ class Kabum20Tests(unittest.TestCase):
             self.assertEqual(offer["source"], "kabum_feed")
         finally:
             db.close()
+    def test_ingest_promotes_official_kabum_http_image_to_https(self):
+        rows = [
+            ['aw_deep_link','product_name','merchant_product_id','search_price',
+             'merchant_image_url','aw_image_url'],
+            ['https://www.awin1.com/pclick.php?p=1&a=3106767&m=17729',
+             'Produto KaBuM','123','99.90',
+             'http://images0.kabum.com.br/produtos/fotos/123/produto.jpg',
+             'https://images2.productserve.com/produto.jpg'],
+        ]
+        stream = io.StringIO(); csv.writer(stream).writerows(rows)
+        db = kabum.init_db(':memory:')
+        try:
+            kabum.ingest(stream.getvalue().encode(), db)
+            image = db.execute(
+                'SELECT image_url FROM kabum_products WHERE product_id=?', ('123',)
+            ).fetchone()[0]
+            self.assertEqual(
+                image,
+                'https://images0.kabum.com.br/produtos/fotos/123/produto.jpg',
+            )
+        finally:
+            db.close()
+
     def test_accessory_category_does_not_receive_priority_bonus(self):
         self.assertFalse(
             kabum._category_priority(
