@@ -40,9 +40,10 @@ O ID loja/produto evita duplicatas. Cada consulta bem-sucedida renova a validade
 para duas horas; ausência em uma busca ou falha de rede não apagam a fila.
 Entradas expiradas são removidas. O JSONL antigo do radar deixa de ser a fonte
 ativa; a primeira consulta do radar preenche a nova fila sem importar preços antigos.
-O JSONL dos grupos continua sendo lido normalmente.
+As ofertas captadas dos grupos também usam SQLite (`captured_queue`); o JSONL antigo
+é lido apenas uma vez para migração compatível e pode ser arquivado depois da validação.
 
-O publicador atende grupos e cupons primeiro. O relógio de 600 segundos se
+O publicador atende grupos e cupons primeiro. O relógio de 1200 segundos se
 aplica só ao radar. Antes do envio, a API revalida preço, filtros e imagem;
 falha nessa preparação remove a candidata, permitindo tentar a próxima.
 Categorias com pontuação a até cinco pontos da melhor alternam pela data de

@@ -13,9 +13,9 @@ O projeto separa captura, descoberta, enriquecimento, geração de afiliado e pu
 - recuperar mensagens recentes ao reiniciar;
 - reconhecer ofertas e mensagens exclusivas de cupons;
 - baixar mídia autorizada;
-- gravar candidatos em `fila_ofertas_v2.jsonl`.
+- gravar candidatos em `captured_queue`, dentro de `publicacoes.sqlite3`.
 
-`CaptureRevisions` e `monitor_recuperacao.json` reduzem duplicação por reprocessamento.
+`CaptureRevisions` e `monitor_recuperacao.json` reduzem duplicação por reprocessamento. A fila SQLite mantém apenas a revisão atual de cada mensagem/produto, expira entradas pela mesma janela do publicador e remove ofertas confirmadas depois do envio. O antigo `fila_ofertas_v2.jsonl` é aceito somente para migração idempotente de instalações existentes.
 
 ### Modo espelho
 

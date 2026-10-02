@@ -19,6 +19,8 @@ class RadarHealthTests(unittest.TestCase):
             "database": {
                 "queue_total": 10,
                 "queue_sources": {"shopee_api": 8, "kabum_feed": 2},
+                "captured_queue_total": 4,
+                "captured_queue_sources": {"Shopee": 3, "Mercado Livre": 1},
                 "ml_quarantined": 1,
                 "ml_circuit_seconds": 0,
                 "ml_failures": {"ML_HTTP_403": 1},
@@ -44,6 +46,8 @@ class RadarHealthTests(unittest.TestCase):
         text = health.render(report)
         self.assertIn("Serviços:", text)
         self.assertIn("Fila radar: 10", text)
+        self.assertIn("Fila capturada: 4", text)
+        self.assertIn("Shopee=3", text)
         self.assertIn("Reservas: uncertain=2", text)
         self.assertIn("Backoff publicador:", text)
         self.assertIn("SEM_IMAGEM=3", text)

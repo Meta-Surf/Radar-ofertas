@@ -2,7 +2,6 @@
 import argparse
 import json
 import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -110,21 +109,6 @@ def refresh(client, offer):
     raise AffiliateError('Oferta Shopee indisponível ou fora dos filtros na revalidação; envio bloqueado.')
 
 
-def save_snapshot(offers, path):
-    # Fila própria: não disputa escrita com o monitor Telegram nem cresce a cada ciclo.
-    name = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                         suffix='.tmp', delete=False) as stream:
-            name = stream.name
-            for offer in offers:
-                stream.write(json.dumps(offer, ensure_ascii=False) + '\n')
-        os.replace(name, path)
-    finally:
-        if name and os.path.exists(name):
-            os.unlink(name)
-
-
 def main():
     from dotenv import load_dotenv
     load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -177,8 +161,8 @@ def main():
                 elif not offers:
                     print('Tente outra busca ou ajuste os filtros; esta consulta não cobre todo o catálogo.')
             except AffiliateError:
-                if args.enfileirar:
-                    save_snapshot([], BASE / 'fila_shopee_api.jsonl')
+                # A fila ativa do radar é SQLite; falha de coleta não apaga
+                # candidatos válidos ainda dentro do TTL.
                 raise
             if not args.loop:
                 break

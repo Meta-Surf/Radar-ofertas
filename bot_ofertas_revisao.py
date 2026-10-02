@@ -24,35 +24,40 @@ from prepublicacao import PrePublicationGate, GateReject
 from mercadolivre_resiliencia import MLResilience
 from telegram_api import TelegramSendError, send_telegram
 from publisher_backoff import PublisherBackoff, offer_revision
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
 
-def rows():
-    for name in ('fila_ofertas_v2.jsonl', 'fila_shopee_api.jsonl'):
-        path = BASE / name
-        if not path.exists():
-            continue
-        # Fecha o arquivo antes de processar: permite substituir a fila no Windows.
-        for line in path.read_text(encoding='utf-8').splitlines():
-            try:
-                value = json.loads(line)
-                if isinstance(value, dict):
-                    yield value
-            except json.JSONDecodeError:
-                continue
+def rows(captured_queue=None):
+    own_queue = captured_queue is None
+    queue = captured_queue or CapturedOfferQueue(BASE / 'publicacoes.sqlite3')
+    try:
+        max_age = max(1, int(os.getenv('IDADE_MAXIMA_MINUTOS', '120')))
+        recovery_age = max(
+            1, int(os.getenv('IDADE_MAXIMA_RECUPERADAS_MINUTOS', '45'))
+        )
+        queue.import_legacy_jsonl(
+            BASE / 'fila_ofertas_v2.jsonl',
+            max_age_minutes=max_age,
+            recovery_max_age_minutes=min(max_age, recovery_age),
+        )
+        yield from queue.pending()
+    finally:
+        if own_queue:
+            queue.close()
 
-def ordered_rows(intelligence=None, channel=""):
+def ordered_rows(intelligence=None, channel="", captured_queue=None):
     # Prioridade: grupos ao vivo > recuperadas > radar.
     # A pausa das recuperadas é aplicada no publicador; durante essa pausa o radar
     # continua podendo usar sua própria janela de 20 minutos.
     live_groups, recovered_groups, radar, latest = [], [], [], {}
-    for offer in rows():
+    for offer in rows(captured_queue):
         if offer.get('source') == 'shopee_api':
             radar.append(offer)
         elif offer.get('kind') != 'coupon_alert' and offer.get('chat_id') is not None and offer.get('message_id') is not None:
-            # A fila é append-only: a última captura substitui a versão anterior,
-            # inclusive quando uma edição altera preço, mídia ou origem de recuperação.
+            # A fila SQLite já mantém a revisão mais recente por mensagem;
+            # esta camada também deduplica o mesmo produto vindo de fontes distintas.
             latest[(offer['chat_id'], offer['message_id'])] = offer
         elif offer.get('recovered'):
             recovered_groups.append(offer)
@@ -202,6 +207,18 @@ def run_publisher(args, parser):
                 reservation_recovery['uncertain_total'], 'uncertain no total.',
             )
     metrics = SourceMetrics(BASE / 'publicacoes.sqlite3')
+    captured_queue = CapturedOfferQueue(BASE / 'publicacoes.sqlite3')
+    migration = captured_queue.import_legacy_jsonl(
+        BASE / 'fila_ofertas_v2.jsonl',
+        max_age_minutes=max_age,
+        recovery_max_age_minutes=min(max_age, recovery_max_age),
+    )
+    if not args.simular and not migration['skipped']:
+        print(
+            'Migração JSONL -> SQLite:',
+            migration['imported'], 'ofertas ativas importadas de',
+            migration['scanned'], 'registros legados.'
+        )
     backoff = PublisherBackoff(ledger.db, enabled=not args.simular)
     backoff.prune()
     ml_session_health = None
@@ -232,7 +249,7 @@ def run_publisher(args, parser):
                 if delay > 0:
                     time.sleep(min(delay, 1))
                     continue
-            for offer in ordered_rows(intelligence, channel):
+            for offer in ordered_rows(intelligence, channel, captured_queue):
                 key = offer.get('product_id')
                 source_key = key
                 revision = json.dumps(offer, sort_keys=True, ensure_ascii=False, default=str)
@@ -329,6 +346,8 @@ def run_publisher(args, parser):
                         any(state[0] != 'sent' for state in states)
                         or not intelligence.can_repeat(offer, channel)
                     ):
+                        if all(state[0] == 'sent' for state in states):
+                            captured_queue.discard_product(source_key)
                         metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA_PRE_FILTRO')
                         gate_blocked[source_key] = revision
                         continue
@@ -611,6 +630,7 @@ def run_publisher(args, parser):
                     ledger.release(key, day)
                     if error.kind == 'permanent':
                         backoff.clear(source_key)
+                        captured_queue.discard_product(source_key)
                         metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX')
                         gate_blocked[source_key] = revision
                         if origin == 'radar':
@@ -651,6 +671,7 @@ def run_publisher(args, parser):
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
                     break
                 ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                captured_queue.discard_product(source_key)
                 backoff.clear(source_key)
                 if offer.get('source') == 'kabum_awin_coupon':
                     intelligence.discard(key)
@@ -661,6 +682,7 @@ def run_publisher(args, parser):
                 break
             time.sleep(1)
     finally:
+        captured_queue.close()
         auto_reader.close()
 
 if __name__ == '__main__':

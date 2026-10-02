@@ -58,6 +58,8 @@ def database_health():
     result = {
         "queue_total": 0,
         "queue_sources": {},
+        "captured_queue_total": 0,
+        "captured_queue_sources": {},
         "gate_24h": {},
         "ml_failures": {},
         "ml_quarantined": 0,
@@ -82,7 +84,28 @@ def database_health():
             source = str(offer.get("source") or "unknown")
             result["queue_sources"][source] = result["queue_sources"].get(source, 0) + 1
 
-        cutoff = time.time() - 86400
+        now = time.time()
+        try:
+            result["captured_queue_total"] = scalar(
+                db,
+                "SELECT COUNT(*) FROM captured_queue WHERE expires_at>?",
+                (now,),
+            )
+            for payload, in db.execute(
+                "SELECT payload FROM captured_queue WHERE expires_at>?", (now,)
+            ):
+                try:
+                    offer = json.loads(payload)
+                except Exception:
+                    continue
+                source = str(offer.get("store") or offer.get("source") or "unknown")
+                result["captured_queue_sources"][source] = (
+                    result["captured_queue_sources"].get(source, 0) + 1
+                )
+        except sqlite3.Error:
+            pass
+
+        cutoff = now - 86400
         try:
             result["gate_24h"] = dict(db.execute(
                 """SELECT reason,COUNT(*) FROM prepublication_gate
@@ -260,6 +283,13 @@ def render(report):
     lines.append(
         f"Fila radar: {db['queue_total']} | fontes: "
         + ", ".join(f"{k}={v}" for k, v in sorted(db["queue_sources"].items()))
+    )
+    lines.append(
+        f"Fila capturada: {db.get('captured_queue_total', 0)} | fontes: "
+        + ", ".join(
+            f"{k}={v}"
+            for k, v in sorted(db.get("captured_queue_sources", {}).items())
+        )
     )
     reservation_states = db.get("reservation_states", {})
     lines.append(

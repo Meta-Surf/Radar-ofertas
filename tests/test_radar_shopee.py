@@ -4,9 +4,11 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
-from radar_shopee import candidate, collect, refresh, save_snapshot
+from radar_shopee import candidate, collect, refresh
 from shopee_afiliados import AffiliateError, ShopeeAffiliate
-from ofertas_core import caption, product
+from ofertas_core import Ledger, caption, product
+from inteligencia_ofertas import Intelligence
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 
 
@@ -80,20 +82,31 @@ class RadarTests(unittest.TestCase):
             client.prepare(candidate(node()))
         client.generate_link.assert_not_called()
 
-    def test_snapshot_replaces_and_publisher_reads_both_queues(self):
+    def test_publisher_reads_group_and_radar_from_sqlite(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
-            path = base/'fila_shopee_api.jsonl'
-            save_snapshot([candidate(node())], path)
-            save_snapshot([candidate(node(itemId=999))], path)
-            (base/'fila_ofertas_v2.jsonl').write_text(json.dumps({'product_id':'telegram'})+'\n')
-            import importlib
-            import sys
-            with patch.dict(sys.modules, {'requests': Mock(), 'dotenv': Mock()}):
-                sys.modules.pop('bot_ofertas_revisao', None)
-                publisher = importlib.import_module('bot_ofertas_revisao')
+            ledger = Ledger(base / 'publicacoes.sqlite3')
+            intelligence = Intelligence(ledger.db)
+            radar_offer = candidate(node(itemId=999))
+            intelligence.enqueue([radar_offer], now=time.time())
+
+            queue = CapturedOfferQueue(base / 'publicacoes.sqlite3')
+            queue.replace_capture([{
+                'product_id': 'telegram',
+                'source': 'telegram',
+                'store': 'Shopee',
+                'kind': 'product_offer',
+                'source_date': '2099-01-01T00:00:00+00:00',
+                'chat_id': -123,
+                'message_id': 1,
+            }])
+
+            import bot_ofertas_revisao as publisher
             with patch.object(publisher, 'BASE', base):
-                rows = list(publisher.rows())
-            self.assertEqual([x['product_id'] for x in rows], ['telegram','Shopee:123:999'])
-            save_snapshot([], path)
-            self.assertEqual(path.read_text(), '')
+                rows = list(publisher.ordered_rows(intelligence, '@teste', queue))
+            self.assertEqual(
+                [x['product_id'] for x in rows],
+                ['telegram', 'Shopee:123:999'],
+            )
+            queue.close()
+            ledger.db.close()

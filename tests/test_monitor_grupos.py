@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import requests
 from ofertas_core import price_info, coupon_page_links, extract_links, caption
 from cupons_shopee import coupon_entries
+from fila_ofertas_sqlite import CapturedOfferQueue
 from monitor_ofertas import (CaptureRevisions, configured_chat_values,
                              dialog_is_configured, resolve_for_capture)
 
@@ -218,9 +219,11 @@ class CaptureFlowTests(unittest.TestCase):
              patch.dict('os.environ', {'TG_API_ID':'123', 'TG_API_HASH':'fake', 'TG_CHATS':'-123', 'TG_MEDIA_CHATS':'-123', 'TELEGRAM_CANAL':'@destino', 'TG_RECUPERAR_MINUTOS':'0'}), \
              patch('builtins.print'):
             asyncio.run(monitor.main())
-            rows = [json.loads(line) for line in (Path(directory) / 'fila_ofertas_v2.jsonl').read_text().splitlines()]
+            queue = CapturedOfferQueue(Path(directory) / 'publicacoes.sqlite3')
+            rows = queue.pending()
+            queue.close()
             offers = [row for row in rows if row['product_id'].startswith('Shopee:')]
-            self.assertEqual([row['price'] for row in offers], ['113,00', '109,00'])
+            self.assertEqual([row['price'] for row in offers], ['109,00'])
             self.assertTrue(all(row['image'] for row in offers))
             self.assertEqual([call.args[0] for call in resolver.call_args_list], [PRODUCT, PRODUCT])
             import sqlite3
@@ -295,8 +298,9 @@ class CaptureFlowTests(unittest.TestCase):
              patch('builtins.print'):
             asyncio.run(monitor.main())
 
-            queue = Path(directory) / 'fila_ofertas_v2.jsonl'
-            rows = [json.loads(line) for line in queue.read_text(encoding='utf-8').splitlines()]
+            queue = CapturedOfferQueue(Path(directory) / 'publicacoes.sqlite3')
+            rows = queue.pending()
+            queue.close()
             offers = [row for row in rows if row.get('product_id') == 'Shopee:1:2']
             self.assertEqual(len(offers), 1)
             self.assertTrue(offers[0].get('capture_digest'))
@@ -305,22 +309,3 @@ class CaptureFlowTests(unittest.TestCase):
 
             state = json.loads((Path(directory) / 'monitor_recuperacao.json').read_text(encoding='utf-8'))
             self.assertEqual(state['-123']['last_message_id'], 555)
-
-    def test_queue_digest_reader_uses_latest_revision(self):
-        import json
-        import tempfile
-        from pathlib import Path
-        import monitor_ofertas as monitor
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'fila_ofertas_v2.jsonl'
-            rows = [
-                {'chat_id': -123, 'message_id': 7, 'capture_digest': 'old'},
-                {'chat_id': -123, 'message_id': 7, 'capture_digest': 'new'},
-                {'chat_id': -456, 'message_id': 8},
-            ]
-            path.write_text('\n'.join(json.dumps(row) for row in rows) + '\n', encoding='utf-8')
-            self.assertEqual(
-                monitor.queued_revision_digests(path),
-                {('-123', 7): 'new'},
-            )

@@ -16,6 +16,7 @@ import mercadolivre_manual as manual
 import monitor_ofertas as monitor
 from ofertas_core import Ledger, price_info
 from shopee_afiliados import AffiliateError
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 SHORT = 'https://meli.la/1Xinc4n'
 DIRECT = 'https://www.mercadolivre.com.br/ar-condicionado/p/MLB123456'
@@ -129,9 +130,9 @@ class MonitoredMercadoLivrePendingTests(unittest.TestCase):
              redirect_stdout(io.StringIO()):
             asyncio.run(monitor.main())
 
-            queue = Path(directory) / 'fila_ofertas_v2.jsonl'
-            self.assertTrue(queue.exists())
-            rows = [json.loads(line) for line in queue.read_text(encoding='utf-8').splitlines()]
+            queue = CapturedOfferQueue(Path(directory) / 'publicacoes.sqlite3')
+            rows = queue.pending()
+            queue.close()
             offers = [row for row in rows if row.get('kind') == 'ml_offer_pending']
             self.assertEqual(len(offers), 1)
             offer = offers[0]

@@ -21,6 +21,7 @@ from shopee_afiliados import AffiliateError
 import canal_espelho as mirror
 import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
@@ -108,29 +109,6 @@ def exclusive_coupon_message(text, messages, shopee_alerts=None, ml_alert=None):
             if product(url):
                 return False
     return True
-
-
-def queued_revision_digests(path):
-    """Reaproveita a própria fila para não duplicar a mesma revisão no reinício."""
-    result = {}
-    if not path.is_file():
-        return result
-    try:
-        with path.open(encoding='utf-8') as source:
-            for line in source:
-                try:
-                    row = json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                digest = row.get('capture_digest')
-                chat_id, message_id = row.get('chat_id'), row.get('message_id')
-                if isinstance(digest, str) and digest and chat_id is not None and isinstance(message_id, int):
-                    result[(str(chat_id), message_id)] = digest
-    except OSError:
-        logging.warning('Não foi possível ler a fila para deduplicar a recuperação inicial.')
-    return result
 
 
 def load_monitor_state(path):
@@ -226,6 +204,7 @@ async def main():
     if not api_id.isdigit() or not api_hash:
         parser.error('Preencha TG_API_ID e TG_API_HASH no .env.')
     client = TelegramClient(str(BASE / 'monitor_ofertas'), int(api_id), api_hash, sequential_updates=True)
+    captured_queue = None
     await client.start()
     try:
         dialogs = [d async for d in client.iter_dialogs() if d.is_group or d.is_channel]
@@ -279,6 +258,10 @@ async def main():
 
         requested_recovery = bounded_env_int('TG_RECUPERAR_MINUTOS', 30, 0, 1440)
         publisher_max_age = bounded_env_int('IDADE_MAXIMA_MINUTOS', 120, 1, 1440)
+        recovery_publish_age = min(
+            publisher_max_age,
+            bounded_env_int('IDADE_MAXIMA_RECUPERADAS_MINUTOS', 45, 1, 1440),
+        )
         recovery_minutes = min(requested_recovery, publisher_max_age)
         recovery_limit = bounded_env_int('TG_RECUPERAR_MAX_MENSAGENS', 500, 20, 2000)
         recovery_state_path = BASE / 'monitor_recuperacao.json'
@@ -348,6 +331,20 @@ async def main():
                         print('Falha de rede ou formato:', type(e).__name__)
             print('Diagnóstico encerrado. Nada foi publicado ou colocado na fila.')
             return
+
+        captured_queue = CapturedOfferQueue(BASE / 'publicacoes.sqlite3')
+        migration = captured_queue.import_legacy_jsonl(
+            BASE / 'fila_ofertas_v2.jsonl',
+            max_age_minutes=publisher_max_age,
+            recovery_max_age_minutes=recovery_publish_age,
+        )
+        if not migration['skipped']:
+            print(
+                'Migração JSONL -> SQLite:',
+                migration['imported'], 'ofertas ativas importadas de',
+                migration['scanned'], 'registros legados.'
+            )
+
         media_dir = BASE / 'imagens_ofertas'
         media_dir.mkdir(exist_ok=True)
 
@@ -386,6 +383,13 @@ async def main():
         revisions = CaptureRevisions()
         capture_lock = asyncio.Lock()
 
+        def queue_rows(rows):
+            return captured_queue.replace_capture(
+                rows,
+                max_age_minutes=publisher_max_age,
+                recovery_max_age_minutes=recovery_publish_age,
+            )
+
         async def capture_once(messages, chat_id, chat, digest=None, recovered=False):
             metric_id = min(m.id for m in messages)
             metric_meta = source_metric_context(chat_id, chat, messages)
@@ -403,19 +407,25 @@ async def main():
             coupon_only = exclusive_coupon_message(text, messages, alerts, ml_alert)
             if coupon_only:
                 if ml_alert:
-                    ml_alert = dict(ml_alert, capture_digest=digest, recovered=recovered, **metric_meta)
-                    with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                        out.write(json.dumps(ml_alert, ensure_ascii=False) + '\n')
+                    ml_alert = dict(
+                        ml_alert, capture_digest=digest,
+                        recovered=recovered, **metric_meta
+                    )
+                    queue_rows([ml_alert])
                     metrics.record_offer(ml_alert, 'CAPTADA')
                     print('Lista exclusiva de cupons Mercado Livre captada:', len(ml_alert['entries']), '| uma publicação, sem links de terceiros.')
                     return
                 if alerts:
-                    with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                        for alert in alerts:
-                            alert = dict(alert, capture_digest=digest, recovered=recovered, **metric_meta)
-                            out.write(json.dumps(alert, ensure_ascii=False) + '\n')
+                    alerts = [
+                        dict(
+                            alert, capture_digest=digest,
+                            recovered=recovered, **metric_meta
+                        )
+                        for alert in alerts
+                    ]
+                    queue_rows(alerts)
                     for alert in alerts:
-                        metrics.record_offer(dict(alert, **metric_meta), 'CAPTADA')
+                        metrics.record_offer(alert, 'CAPTADA')
                     print('Mensagem exclusiva de cupons Shopee captada:', sum(len(a['entries']) for a in alerts), '| links aguardando conversão.')
                     return
             if ml_manual.trusted(chat_id):
@@ -433,8 +443,7 @@ async def main():
                 row.update(metric_meta)
                 row['capture_digest'] = digest
                 row['recovered'] = recovered
-                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                    out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                queue_rows([row])
                 metrics.record_offer(row, 'CAPTADA')
                 print('Oferta manual Mercado Livre captada:', row['product_id'], '| preço:', row['price'] or 'aguardando leitura automática do link')
                 return
@@ -488,8 +497,7 @@ async def main():
                        'captured_at': datetime.now(timezone.utc).isoformat(),
                        'source_date': messages[0].date.isoformat(),
                        'capture_digest': digest, 'recovered': recovered, **metric_meta}
-                with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                    out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                queue_rows([row])
                 metrics.record_offer(row, 'CAPTADA')
                 print('Oferta espelho captada:', key, '| loja:', store, '| imagem:', bool(image))
                 return
@@ -557,8 +565,7 @@ async def main():
                    'source_date': messages[0].date.isoformat(),
                    'capture_digest': digest,
                    'recovered': recovered, **metric_meta}
-            with (BASE / 'fila_ofertas_v2.jsonl').open('a', encoding='utf-8') as out:
-                out.write(json.dumps(row, ensure_ascii=False) + '\n')
+            queue_rows([row])
             metrics.record_offer(row, 'CAPTADA')
             print('Oferta captada:', key, '| preço:', row['price'] or 'não identificado/ambíguo',
                   '| condição:', row['price_condition'] or 'nenhuma',
@@ -595,7 +602,7 @@ async def main():
                 print('Recuperação inicial de mensagens: desativada por TG_RECUPERAR_MINUTOS=0.')
                 return
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=recovery_minutes)
-            queued = queued_revision_digests(BASE / 'fila_ofertas_v2.jsonl')
+            queued = captured_queue.revision_digests()
             scanned = recovered = already_queued = failures = 0
             print(f'Recuperando mensagens dos últimos {recovery_minutes} minutos '
                   f'(até {recovery_limit} por chat)...')
@@ -664,6 +671,8 @@ async def main():
         print(f'Monitorando {len(set(selected))} chats. Ctrl+C para parar.')
         await client.run_until_disconnected()
     finally:
+        if captured_queue is not None:
+            captured_queue.close()
         await client.disconnect()
 
 if __name__ == '__main__':

@@ -332,7 +332,7 @@ Nunca substitua ou apague sem backup:
 - `.env`;
 - `monitor_ofertas.session`;
 - `publicacoes.sqlite3` e WAL/SHM;
-- `fila_ofertas_v2.jsonl` e demais filas;
+- `publicacoes.sqlite3` (inclui `captured_queue` dos grupos e `radar_queue` dos radares);
 - `monitor_recuperacao.json`;
 - `imagens_ofertas/`;
 - `kabum_historico.sqlite3`;

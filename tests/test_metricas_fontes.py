@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from metricas_fontes import SourceMetrics
 from relatorio_fontes import aggregate
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 
 class SourceMetricsTests(unittest.TestCase):
@@ -67,9 +68,9 @@ class PublisherMetricsTests(unittest.TestCase):
                 'chat_id': -123, 'message_id': 77,
                 'source_name': 'Fonte A', 'source_username': 'fontea',
             }
-            (base / 'fila_ofertas_v2.jsonl').write_text(
-                __import__('json').dumps(offer) + '\n', encoding='utf-8'
-            )
+            queue = CapturedOfferQueue(base / 'publicacoes.sqlite3')
+            queue.replace_capture([offer])
+            queue.close()
             affiliate = Mock()
             affiliate.prepare.side_effect = lambda row: dict(
                 row, affiliate_generated=True,

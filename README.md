@@ -155,12 +155,14 @@ Cupons genéricos KaBuM usam `cupons_kabum.py` e `assets/banner_cupons_kabum.png
 
 ## Recuperação e persistência
 
-O monitor reprocessa por padrão mensagens recentes ao iniciar. A fila e o banco local preservam a continuidade e evitam rajadas/repetições. Preserve especialmente:
+O monitor reprocessa por padrão mensagens recentes ao iniciar. As filas ativas ficam em `publicacoes.sqlite3`: `captured_queue` recebe ofertas dos grupos/canais e `radar_queue` recebe os radares contínuos. A fila capturada substitui revisões antigas da mesma mensagem, expira entradas pela janela de publicação e remove itens enviados com sucesso. O antigo `fila_ofertas_v2.jsonl` é apenas uma fonte de migração compatível para instalações existentes.
+
+Preserve especialmente:
 
 - `.env`;
 - `monitor_ofertas.session`;
 - `publicacoes.sqlite3` e arquivos WAL/SHM associados;
-- filas locais e `imagens_ofertas/`;
+- `monitor_recuperacao.json` e `imagens_ofertas/`;
 - histórico/cache KaBuM local quando desejar preservar a linha de base.
 
 ### Reservas de publicação

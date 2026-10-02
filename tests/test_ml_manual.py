@@ -14,6 +14,7 @@ import cupons_mercadolivre as coupons
 import bot_ofertas_revisao as publisher
 from ofertas_core import Ledger, caption
 from shopee_afiliados import AffiliateError
+from fila_ofertas_sqlite import CapturedOfferQueue
 
 CHAT = -1003988174916
 URL = 'https://meli.la/MeuLink'
@@ -160,8 +161,10 @@ class ManualMLTests(unittest.TestCase):
              patch.dict(os.environ, {'TG_API_ID': '123', 'TG_API_HASH': 'fake', 'TG_CHATS': '', 'TG_MEDIA_CHATS': '', 'TELEGRAM_CANAL': '@destino'}), \
              redirect_stdout(io.StringIO()):
             asyncio.run(monitor.main())
-            rows = [json.loads(line) for line in (Path(directory) / 'fila_ofertas_v2.jsonl').read_text().splitlines()]
-            self.assertEqual([r['price'] for r in rows], ['1.103,08', '999,00'])
+            queue = CapturedOfferQueue(Path(directory) / 'publicacoes.sqlite3')
+            rows = queue.pending()
+            queue.close()
+            self.assertEqual([r['price'] for r in rows], ['999,00'])
             self.assertTrue(all(r['image'] for r in rows))
             self.assertTrue(all(r['url'] == URL for r in rows))
             resolver.assert_not_called()
