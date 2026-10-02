@@ -9,6 +9,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 from shopee_afiliados import ShopeeAffiliate, AffiliateError
+import publicacao_oferta as offer_publisher
 
 URL='https://shopee.com.br/product/123/456'
 LINK='https://s.shopee.com.br/MeuLinkTeste'
@@ -59,23 +60,26 @@ class AffiliateTests(unittest.TestCase):
         self.assertEqual(c.details('Shopee:123:456'),{})
     def publisher(self):
         # Dependências substituídas só nos testes: nenhum envio ou autenticação.
-        deps={'requests':Mock(), 'dotenv':Mock()}
+        deps={'dotenv':Mock()}
         with patch.dict(sys.modules,deps):
             sys.modules.pop('bot_ofertas_revisao',None)
             return importlib.import_module('bot_ofertas_revisao')
     def test_send_button_has_returned_link(self):
         p=self.publisher()
-        p.requests.post.return_value.json.return_value={'ok':True,'result':{'message_id':12}}
+        response=Mock()
+        response.json.return_value={'ok':True,'result':{'message_id':12}}
         offer={'store':'Shopee','price':'99,90','affiliate_url':LINK,'affiliate_generated':True}
-        p.send('FAKE_TOKEN','@teste',offer,None)
-        data=p.requests.post.call_args.kwargs['data']
+        with patch.object(offer_publisher.requests,'post',return_value=response) as post:
+            p.send('FAKE_TOKEN','@teste',offer,None)
+        data=post.call_args.kwargs['data']
         self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'][0][0]['url'],LINK)
         self.assertIn('(ANÚNCIO)',data['text'])
     def test_send_without_affiliate_never_calls_telegram(self):
         p=self.publisher()
-        with self.assertRaises(AffiliateError):
-            p.send('fake','@teste',{'url':URL},None)
-        p.requests.post.assert_not_called()
+        with patch.object(offer_publisher.requests,'post') as post:
+            with self.assertRaises(AffiliateError):
+                p.send('fake','@teste',{'url':URL},None)
+            post.assert_not_called()
     def test_api_failure_releases_reservation_and_no_send(self):
         p=self.publisher()
         offer={'url':URL,'product_id':'Shopee:123:456','price':'99,90','source_date':datetime.now(timezone.utc).isoformat()}

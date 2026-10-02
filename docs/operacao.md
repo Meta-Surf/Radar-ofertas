@@ -20,7 +20,7 @@ py -m playwright install chromium
 
 ## Produção atual — VPS Linux
 
-A instância de produção fica em `/opt/radar` e usa serviços `systemd` separados:
+A instância de produção fica em `/opt/radar` e usa serviços `systemd` separados. Os units usados pela VPS estão versionados em `deploy/systemd/` e o procedimento de reinstalação está em `deploy/README.md`:
 
 ```bash
 systemctl status radar-monitor.service
@@ -340,12 +340,14 @@ Nunca substitua ou apague sem backup:
 
 - `.env`;
 - `monitor_ofertas.session`;
-- `publicacoes.sqlite3` e WAL/SHM;
-- `publicacoes.sqlite3` (inclui `captured_queue` dos grupos e `radar_queue` dos radares);
+- `publicacoes.sqlite3` e WAL/SHM (inclui `captured_queue` dos grupos e `radar_queue` dos radares);
 - `monitor_recuperacao.json`;
+- `destinos_confirmados.json`, quando existir;
 - `imagens_ofertas/`;
 - `kabum_historico.sqlite3`;
 - `kabum_feed_atual.csv.gz`.
+
+O script de backup usado pela produção está versionado em `deploy/bin/radar-backup.sh`; filas JSONL antigas não fazem mais parte dos dados ativos.
 
 ## Diagnóstico geral
 

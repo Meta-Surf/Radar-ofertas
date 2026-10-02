@@ -1,4 +1,4 @@
-> **DOCUMENTO HISTÓRICO (27/09/2026).** Não use os intervalos, número de temas ou passos de instalação abaixo como referência operacional atual. O sistema atual usa 43 temas e relógio de 1200 segundos (20 minutos) para o Radar Shopee. Veja [docs/operacao.md](docs/operacao.md).
+> **DOCUMENTO HISTÓRICO (27/09/2026).** Não use os intervalos, número de temas ou passos de instalação abaixo como referência operacional atual. O sistema atual usa 43 temas e relógio de 1200 segundos (20 minutos) para o Radar Shopee. Veja [docs/operacao.md](../operacao.md).
 
 # Atualização — marcas, fila e histórico — 27/09/2026
 

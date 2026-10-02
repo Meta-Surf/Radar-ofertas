@@ -1,0 +1,17 @@
+[Unit]
+Description=Radar de Ofertas - Radar Shopee
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radar
+Group=radar
+WorkingDirectory=/opt/radar
+ExecStart=/opt/radar/.venv/bin/python -u /opt/radar/radar_shopee_continuo.py --enfileirar --loop --intervalo 1200 --limite 3
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

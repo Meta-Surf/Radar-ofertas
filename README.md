@@ -88,7 +88,7 @@ Na produção, o projeto fica em `/opt/radar` e os componentes principais são g
 - `radar-publicador.service` — publicação unificada;
 - `radar-shopee.service` — radar contínuo Shopee.
 
-O fluxo `.bat` continua documentado para execução local em Windows, mas não é o gerenciador da instância de produção.
+O fluxo `.bat` continua documentado para execução local em Windows, mas não é o gerenciador da instância de produção. Os units e o script de backup usados pela VPS estão versionados em `deploy/`; a divisão entre entrypoints, núcleo compartilhado, integrações, utilitários e histórico está documentada em [docs/estrutura-repositorio.md](docs/estrutura-repositorio.md).
 
 ## Configuração
 

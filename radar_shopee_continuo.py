@@ -256,7 +256,7 @@ def run_round(args, parser):
         from radar_shopee import collect
         from shopee_afiliados import ShopeeAffiliate
         from ofertas_core import Ledger, caption
-        from bot_ofertas_revisao import send
+        from publicacao_oferta import send_offer as send
     except ImportError:
         parser.exit(1, 'Coloque este arquivo junto dos módulos do radar e instale requirements.txt.\n')
     base = Path(__file__).resolve().parent

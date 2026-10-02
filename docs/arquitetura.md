@@ -27,7 +27,7 @@ O projeto separa captura, descoberta, enriquecimento, geração de afiliado e pu
 
 `radar_shopee_continuo.py` consulta os 43 temas definidos em `radar_categorias.json` e alimenta a fila persistente de inteligência.
 
-`bot_ofertas_revisao.py` revalida ofertas, gera o link via `shopee_afiliados.py` e publica. O relógio exclusivo do radar é de 1200 segundos. Ofertas dos grupos/canais não aguardam esse relógio.
+`bot_ofertas_revisao.py` revalida ofertas e gera o link via `shopee_afiliados.py`. A validação final e o envio de uma oferta comum ficam em `publicacao_oferta.py`, compartilhado também pelo modo manual do radar sem criar dependência do radar no processo principal do publicador. O relógio exclusivo do radar é de 1200 segundos. Ofertas dos grupos/canais não aguardam esse relógio.
 
 ## Mercado Livre
 
@@ -39,7 +39,7 @@ Fluxos atuais:
 4. **resiliência**: `mercadolivre_resiliencia.py` mantém backoff, quarentena e circuit breaker persistentes;
 5. **cupons**: `cupons_mercadolivre.py` monta a publicação própria de listas exclusivas.
 
-O OAuth em `mercadolivre_auth.py` permanece útil para experimentos/API, mas não é o mecanismo usado pela geração de afiliado.
+O utilitário OAuth experimental foi movido para `archive/mercadolivre/mercadolivre_auth_oauth.py`; ele não participa da geração de afiliado nem dos serviços atuais.
 
 ## Cupons
 

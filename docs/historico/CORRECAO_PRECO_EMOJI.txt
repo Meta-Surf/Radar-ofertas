@@ -1,4 +1,4 @@
-DOCUMENTO HISTÓRICO — correção incremental de preço. Para operação atual, consulte docs/operacao.md e INTEGRACAO.md.
+DOCUMENTO HISTÓRICO — correção incremental de preço. Para operação atual, consulte ../operacao.md e ../../INTEGRACAO.md.
 
 Correção adicional: 💵2,943 agora é capturado como R$ 2.943,00.
 87 testes passaram com APIs simuladas, incluindo a mensagem enviada.

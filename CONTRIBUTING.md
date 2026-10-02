@@ -6,7 +6,7 @@
 4. Execute `python -m unittest discover -p "test_*.py" -v` na raiz.
 5. Abra um pull request descrevendo o problema, a alteração e como foi validada.
 
-Os testes automatizados não devem publicar no Telegram nem depender de credenciais reais. Testes de integração manuais devem ser identificados explicitamente; `teste_mercadolivre.py` consulta a API real.
+Os testes automatizados não devem publicar no Telegram nem depender de credenciais reais. Testes manuais que acessam serviços externos ficam fora da suíte automática; o antigo teste real do Mercado Livre está arquivado em `archive/mercadolivre/teste_mercadolivre_real.py`.
 
 Mantenha os comandos da raiz compatíveis com o fluxo Windows existente. Atualize `docs/operacao.md` e `.env.example`/`.env.exemplo` quando mudar configurações. Novas funcionalidades devem ser implementadas nos scripts atuais, não no arquivo histórico.
 

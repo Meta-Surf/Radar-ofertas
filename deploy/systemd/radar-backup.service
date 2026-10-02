@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup do Radar de Ofertas
+
+[Service]
+Type=oneshot
+User=radar
+Group=radar
+ExecStart=/usr/local/bin/radar-backup.sh

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import canal_espelho as mirror
 from shopee_afiliados import AffiliateError
 import bot_ofertas_revisao as publisher
+import publicacao_oferta as offer_publisher
 import monitor_ofertas as monitor
 from unittest.mock import Mock, patch
 
@@ -91,7 +92,7 @@ class CanalEspelhoTests(unittest.TestCase):
         }
         response = Mock()
         response.json.return_value = {"ok": True, "result": {"message_id": 321}}
-        with patch.object(publisher.requests, "post", return_value=response) as post:
+        with patch.object(offer_publisher.requests, "post", return_value=response) as post:
             message_id, wait = publisher.send("token", "@destino", offer, None)
         self.assertEqual((message_id, wait), (321, 0))
         data = post.call_args.kwargs["data"]
