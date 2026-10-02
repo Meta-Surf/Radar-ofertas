@@ -229,6 +229,18 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result["product_id"], "KaBuMCoupon:999")
         self.assertEqual(result["code"], "TESTE10")
 
+    def test_kabum_coupon_offers_api_is_cached_for_short_burst(self):
+        import cupons_kabum
+        item = self.kabum_coupon_item()
+        prepared = cupons_kabum.alert_from_offer(item, self.kabum)
+        api = Mock(enabled=True)
+        api.offers.return_value = [item]
+        gate = self.gate()
+        with patch("awin_kabum.AwinKabumAPI.from_env", return_value=api):
+            gate.validate(prepared, dict(prepared), "@canal")
+            gate.validate(prepared, dict(prepared), "@canal")
+        api.offers.assert_called_once()
+
     def test_kabum_coupon_missing_from_api_blocks_as_inactive(self):
         import cupons_kabum
         item = self.kabum_coupon_item()

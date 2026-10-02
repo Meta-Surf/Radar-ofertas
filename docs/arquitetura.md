@@ -14,6 +14,16 @@ Estados previstos: `PENDING`, `SENDING`, `SENT`, `RETRY`, `UNCERTAIN`, `FAILED` 
 
 A atribuição de afiliados também aceita destino. Shopee usa Sub ID específico por destino; KaBuM/Awin adiciona `clickref` por destino; Mercado Livre exige uma tag explícita própria para qualquer destino diferente de Telegram. Isso impede que tráfego de Instagram/WhatsApp seja contabilizado como Telegram.
 
+## Desempenho e confiabilidade
+
+O monitor usa concorrência limitada entre chats (`TG_CAPTURA_CONCORRENCIA`, padrão 4), preservando serialização por chat. Assim, um redirecionador lento em uma fonte não bloqueia as demais, sem perder ordem de edições/álbuns da mesma origem.
+
+`mercadolivre_auto.AutoReader` deduplica leituras pelo conteúdo relevante da oferta e mantém cache em memória: até 5 minutos para enriquecimento assíncrono e até 60 segundos para revalidação forte do Gate. Campos transitórios como horário de captura não invalidam o cache; mudanças de preço/texto/imagem relevantes invalidam. A Offers API Awin usada para cupons KaBuM também possui cache de 60 segundos para rajadas.
+
+`limpeza_imagens.py` remove somente imagens locais não referenciadas pelas filas e mais antigas que a retenção configurada. A limpeza é limitada e periódica para evitar varreduras a cada mensagem.
+
+`requirements.lock` fixa as versões validadas em produção/CI, enquanto `requirements.txt` mantém as faixas suportadas para upgrades deliberados.
+
 ## Telegram
 
 `monitor_ofertas.py` usa Telethon para:

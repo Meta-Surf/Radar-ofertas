@@ -694,17 +694,33 @@ def enrich(offer):
 
 
 class AutoReader:
-    """Uma consulta em segundo plano; não para capturas nem outras publicações."""
+    """Leitura ML com deduplicação, cache curto e fallback em segundo plano."""
+    CACHE_SECONDS = 300
+    GATE_CACHE_SECONDS = 60
+    CACHE_LIMIT = 128
+
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ml-auto')
         self.jobs, self.cache = {}, {}
 
-    def read(self, offer, blocking=False):
-        if blocking:
-            return enrich(offer)
-        fingerprint = hashlib.sha256(json.dumps(offer, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        now = time.monotonic()
-        self.cache = {k: v for k, v in self.cache.items() if now - v[0] < 300}
+    @staticmethod
+    def fingerprint(offer):
+        # Ignora campos puramente operacionais para que a mesma oferta capturada
+        # novamente não force outra navegação cara. Campos que alteram o resultado
+        # (preço/texto/imagem) continuam fazendo parte da identidade.
+        keys = (
+            'kind', 'source', 'chat_id', 'product_id', 'url', 'name', 'price',
+            'price_condition', 'price_from', 'image', 'api_image',
+        )
+        payload = {key: offer.get(key) for key in keys if key in offer}
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    def _drain(self, now):
+        self.cache = {
+            key: value for key, value in self.cache.items()
+            if now - value[0] < self.CACHE_SECONDS
+        }
         for identity, pending in list(self.jobs.items()):
             if pending.done():
                 del self.jobs[identity]
@@ -713,21 +729,43 @@ class AutoReader:
                 except AffiliateError as error:
                     value = error
                 except Exception:
-                    value = AffiliateError('Falha inesperada na leitura ML; aguardando nova tentativa.')
+                    value = AffiliateError(
+                        'Falha inesperada na leitura ML; aguardando nova tentativa.'
+                    )
                 self.cache[identity] = (now, value)
-        while len(self.cache) > 128:
+        while len(self.cache) > self.CACHE_LIMIT:
             self.cache.pop(next(iter(self.cache)))
-        if fingerprint in self.cache:
-            value = self.cache[fingerprint][1]
-            if isinstance(value, Exception):
-                raise value
+
+    def _cached(self, fingerprint, now, max_age):
+        cached = self.cache.get(fingerprint)
+        if not cached or now - cached[0] > max_age:
+            return None
+        value = cached[1]
+        if isinstance(value, Exception):
+            raise value
+        return dict(value)
+
+    def read(self, offer, blocking=False, max_age=None):
+        fingerprint = self.fingerprint(offer)
+        now = time.monotonic()
+        self._drain(now)
+        ttl = (
+            self.GATE_CACHE_SECONDS if blocking else self.CACHE_SECONDS
+        ) if max_age is None else max(0, min(float(max_age), self.CACHE_SECONDS))
+        cached = self._cached(fingerprint, now, ttl)
+        if cached is not None:
+            return cached
+
+        if blocking:
+            value = enrich(dict(offer))
+            self.cache[fingerprint] = (time.monotonic(), dict(value))
             return dict(value)
+
         job = self.jobs.get(fingerprint)
         if job is None:
             if len(self.jobs) >= 4:
                 return None
             self.jobs[fingerprint] = self.executor.submit(enrich, dict(offer))
-            return None
         return None
 
     def close(self):

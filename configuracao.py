@@ -139,6 +139,7 @@ class MonitorConfig:
     recovery_limit: int
     offer_max_age_minutes: int
     recovered_max_age_minutes: int
+    capture_concurrency: int
     chats: tuple
     media_chats: tuple
     paused_chats: tuple
@@ -173,6 +174,9 @@ class MonitorConfig:
             ),
             offer_max_age_minutes=offer_max_age,
             recovered_max_age_minutes=min(offer_max_age, recovered_max_age),
+            capture_concurrency=env_int(
+                "TG_CAPTURA_CONCORRENCIA", 4, minimum=1, maximum=16
+            ),
             chats=env_csv("TG_CHATS"),
             media_chats=env_csv("TG_MEDIA_CHATS"),
             paused_chats=env_csv("TG_PAUSED_CHATS", lower=True),
@@ -233,6 +237,7 @@ def operational_snapshot():
             "configured_chats": len(monitor.chats),
             "media_chats": len(monitor.media_chats),
             "paused_chats": len(monitor.paused_chats),
+            "capture_concurrency": monitor.capture_concurrency,
         },
         "gate": {
             "source_price_max_age_seconds": gate.source_price_max_age_seconds,

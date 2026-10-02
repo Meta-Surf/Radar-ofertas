@@ -29,6 +29,7 @@ class ConfiguracaoTests(unittest.TestCase):
         self.assertEqual(publisher.recovered_interval_seconds, 30)
         self.assertEqual(monitor.recovery_minutes, 30)
         self.assertEqual(monitor.recovery_limit, 500)
+        self.assertEqual(monitor.capture_concurrency, 4)
         self.assertEqual(monitor.offer_max_age_minutes, publisher.offer_max_age_minutes)
         self.assertEqual(
             monitor.recovered_max_age_minutes,
@@ -55,6 +56,16 @@ class ConfiguracaoTests(unittest.TestCase):
         self.assertEqual(publisher.recovered_interval_seconds, 5)
         self.assertEqual(monitor.recovery_limit, 2000)
         self.assertEqual(gate.source_price_max_age_seconds, 60)
+
+    def test_concorrencia_de_captura_respeita_limites(self):
+        with patch.dict(
+            os.environ, {"TG_CAPTURA_CONCORRENCIA": "99"}, clear=True
+        ):
+            self.assertEqual(MonitorConfig.from_env().capture_concurrency, 16)
+        with patch.dict(
+            os.environ, {"TG_CAPTURA_CONCORRENCIA": "0"}, clear=True
+        ):
+            self.assertEqual(MonitorConfig.from_env().capture_concurrency, 1)
 
     def test_recuperadas_nunca_excedem_idade_maxima_geral(self):
         with patch.dict(

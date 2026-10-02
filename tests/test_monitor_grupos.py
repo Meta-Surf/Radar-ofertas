@@ -8,8 +8,9 @@ import requests
 from ofertas_core import price_info, coupon_page_links, extract_links, caption
 from cupons_shopee import coupon_entries
 from fila_ofertas_sqlite import CapturedOfferQueue
-from monitor_ofertas import (CaptureRevisions, configured_chat_values,
-                             dialog_is_configured, offer_title, resolve_for_capture)
+from monitor_ofertas import (CaptureCoordinator, CaptureRevisions,
+                             configured_chat_values, dialog_is_configured,
+                             offer_title, resolve_for_capture)
 
 EXAMPLE = '''🔥 Kit Ventoinha Pichau Ventus NX, ARGB, 5x120mm, Branco, PCH-VTNX5-WH01
 
@@ -90,6 +91,43 @@ class GroupMonitoringTests(unittest.TestCase):
                      f'Resgate cupons\nR$ 10 OFF\nNotebook\n{PRODUCT}']:
             self.assertEqual(coupon_page_links(body), set())
         self.assertEqual(coupon_page_links(f'Resgate cupons\nR$ 10 OFF\n{COUPON}\n{PRODUCT}'), {COUPON})
+
+    def test_capture_coordinator_parallelizes_chats_and_serializes_same_chat(self):
+        async def scenario():
+            coordinator = CaptureCoordinator(2)
+            started = []
+            release = asyncio.Event()
+
+            async def worker(name):
+                started.append(name)
+                await release.wait()
+                return name
+
+            one = asyncio.create_task(
+                coordinator.run(-1, lambda: worker('chat-1'))
+            )
+            two = asyncio.create_task(
+                coordinator.run(-2, lambda: worker('chat-2'))
+            )
+            await asyncio.sleep(0.01)
+            self.assertEqual(set(started), {'chat-1', 'chat-2'})
+            release.set()
+            self.assertEqual(await asyncio.gather(one, two), ['chat-1', 'chat-2'])
+
+            started.clear()
+            release = asyncio.Event()
+            first = asyncio.create_task(
+                coordinator.run(-3, lambda: worker('first'))
+            )
+            second = asyncio.create_task(
+                coordinator.run(-3, lambda: worker('second'))
+            )
+            await asyncio.sleep(0.01)
+            self.assertEqual(started, ['first'])
+            release.set()
+            self.assertEqual(await asyncio.gather(first, second), ['first', 'second'])
+
+        asyncio.run(scenario())
 
     def test_repeated_metadata_edit_is_skipped_but_price_and_media_changes_are_not(self):
         cache = CaptureRevisions()

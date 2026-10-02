@@ -20,6 +20,8 @@
 - `telegram_api.py` — classificação de respostas da Bot API.
 - `publisher_backoff.py` — backoff persistente do publicador.
 - `metricas_fontes.py` — métricas por origem.
+- `distribuicao.py` — Outbox/fundação de entregas multicanal.
+- `limpeza_imagens.py` — retenção e remoção segura de imagens temporárias fora das filas.
 
 ## Integrações
 

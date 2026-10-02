@@ -49,6 +49,36 @@ def newest_backup():
     }
 
 
+def image_storage_health():
+    root = BASE / "imagens_ofertas"
+    if not root.exists():
+        return {"files": 0, "size_mb": 0.0, "oldest_hours": 0.0}
+    files = []
+    for path in root.rglob("*"):
+        try:
+            if path.is_file() and not path.is_symlink():
+                files.append(path)
+        except OSError:
+            continue
+    if not files:
+        return {"files": 0, "size_mb": 0.0, "oldest_hours": 0.0}
+    now = time.time()
+    total = 0
+    oldest = now
+    for path in files:
+        try:
+            stat = path.stat()
+            total += stat.st_size
+            oldest = min(oldest, stat.st_mtime)
+        except OSError:
+            continue
+    return {
+        "files": len(files),
+        "size_mb": round(total / 1024 / 1024, 1),
+        "oldest_hours": round(max(0, now - oldest) / 3600, 1),
+    }
+
+
 def scalar(db, sql, args=(), default=0):
     try:
         row = db.execute(sql, args).fetchone()
@@ -226,6 +256,7 @@ def collect():
     db = database_health()
     backup = newest_backup()
     kabum = kabum_stock_health()
+    images = image_storage_health()
     integrations = {
         "shopee": configured(env, "SHOPEE_APP_ID", "SHOPEE_SECRET"),
         "mercadolivre": configured(
@@ -272,6 +303,8 @@ def collect():
         warnings.append("KaBuM: estoque oficial sem cobertura")
     if not integrations["amazon_creators"]:
         warnings.append("Amazon: Creators API aguardando credenciais")
+    if images["size_mb"] > 1024:
+        warnings.append(f"imagens temporárias acima de 1 GB: {images['size_mb']} MB")
 
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -279,6 +312,7 @@ def collect():
         "database": db,
         "backup": backup,
         "kabum_stock": kabum,
+        "images": images,
         "integrations": integrations,
         "operational_config": operational_snapshot(),
         "critical": critical,
@@ -304,6 +338,7 @@ def render(report):
             f"recuperadas={publisher.get('recovered_max_age_minutes', 0)}m/"
             f"{publisher.get('recovered_interval_seconds', 0)}s | "
             f"recovery={monitor.get('recovery_minutes', 0)}m | "
+            f"captura={monitor.get('capture_concurrency', 1)}x | "
             f"gate_preco={gate.get('source_price_max_age_seconds', 0)}s"
         )
     distribution = config.get("distribution", {})
@@ -323,6 +358,12 @@ def render(report):
             f"{k}={v}"
             for k, v in sorted(db.get("captured_queue_sources", {}).items())
         )
+    )
+    images = report.get("images", {})
+    lines.append(
+        f"Imagens temporárias: {images.get('files', 0)} arquivos | "
+        f"{images.get('size_mb', 0.0)} MB | "
+        f"mais antiga={images.get('oldest_hours', 0.0)}h"
     )
     reservation_states = db.get("reservation_states", {})
     lines.append(

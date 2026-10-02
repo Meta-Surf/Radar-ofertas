@@ -287,6 +287,31 @@ class AutoMLTests(unittest.TestCase):
             reader.close()
             executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
+    def test_blocking_reader_reuses_fresh_cache_and_ignores_transient_fields(self):
+        entry = row()
+        ready = dict(entry, **auto.extract_product(document(), DIRECT))
+        with patch.object(auto, 'enrich', return_value=ready) as enrich:
+            reader = auto.AutoReader()
+            first = reader.read(entry, blocking=True)
+            second = reader.read(
+                dict(entry, captured_at='2026-10-02T18:00:00+00:00'),
+                blocking=True,
+            )
+            self.assertEqual(first['price'], '199,90')
+            self.assertEqual(second['price'], '199,90')
+            enrich.assert_called_once()
+            reader.close()
+
+    def test_blocking_reader_invalidates_cache_when_price_context_changes(self):
+        entry = row('Câmera\nR$ 189,90 no PIX\n' + URL)
+        ready = dict(entry, **auto.extract_product(document(), DIRECT))
+        with patch.object(auto, 'enrich', return_value=ready) as enrich:
+            reader = auto.AutoReader()
+            reader.read(entry, blocking=True)
+            reader.read(dict(entry, price='179,90'), blocking=True)
+            self.assertEqual(enrich.call_count, 2)
+            reader.close()
+
     def test_failed_completed_job_is_removed_and_reported(self):
         future = Future(); future.set_exception(AffiliateError('HTTP 403'))
         executor = Mock(); executor.submit.return_value = future

@@ -36,6 +36,8 @@ venv/
 
 # Travas de processos locais
 *.lock
+# Exceção: lock reprodutível de dependências Python.
+!requirements.lock
 
 # Arte original restaurada automaticamente das partes versionadas
 /assets/banner_cupons.png

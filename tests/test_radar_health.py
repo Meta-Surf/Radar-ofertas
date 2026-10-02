@@ -59,6 +59,7 @@ class RadarHealthTests(unittest.TestCase):
         self.assertIn("recuperadas=45m/30s", text)
         self.assertIn("Fila radar: 10", text)
         self.assertIn("Fila capturada: 4", text)
+        self.assertIn("Imagens temporárias:", text)
         self.assertIn("Shopee=3", text)
         self.assertIn("Reservas: uncertain=2", text)
         self.assertIn("Backoff publicador:", text)

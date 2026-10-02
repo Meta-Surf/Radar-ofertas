@@ -83,6 +83,22 @@ class DeliveryOutboxTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertIn('enriched', payload)
 
+    def test_claim_is_idempotent_after_worker_crash_boundary(self):
+        offer = {"product_id": "Shopee:crash:1"}
+        self.outbox.enqueue(
+            offer["product_id"], destination="instagram", account="perfil",
+            surface="feed", day="2026-10-02", payload=offer,
+        )
+        delivery_id = self.outbox.ready("instagram")[0][0]
+        self.assertTrue(self.outbox.claim(delivery_id))
+        self.assertFalse(self.outbox.claim(delivery_id))
+        self.assertEqual(
+            self.db.execute(
+                "SELECT state,attempts FROM deliveries WHERE id=?", (delivery_id,)
+            ).fetchone(),
+            ("SENDING", 1),
+        )
+
     def test_outbox_claim_and_retry_are_destination_scoped(self):
         offer = {"product_id": "Shopee:9:9", "price": "19,90"}
         self.outbox.enqueue(

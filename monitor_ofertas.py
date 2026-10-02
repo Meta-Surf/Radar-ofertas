@@ -22,11 +22,29 @@ import canal_espelho as mirror
 import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
 from fila_ofertas_sqlite import CapturedOfferQueue
+from limpeza_imagens import ImageJanitor
 from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int, secure_runtime_permissions
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env', encoding='utf-8-sig')
 logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+class CaptureCoordinator:
+    """Permite paralelismo entre chats sem reordenar eventos do mesmo chat."""
+    def __init__(self, limit=4):
+        self.limit = max(1, int(limit))
+        self.semaphore = asyncio.Semaphore(self.limit)
+        self.chat_locks = {}
+
+    async def run(self, chat_id, callback):
+        key = str(chat_id)
+        lock = self.chat_locks.setdefault(key, asyncio.Lock())
+        # O lock do chat vem antes do semáforo: eventos repetidos do mesmo chat
+        # não consomem slots globais enquanto aguardam sua vez.
+        async with lock:
+            async with self.semaphore:
+                return await callback()
+
 
 class CaptureRevisions:
     """Ignora atualizações sem mudança de texto, links ou mídia por uma hora."""
@@ -222,7 +240,10 @@ async def main():
     api_id, api_hash = telegram.api_id, telegram.api_hash
     if not api_id.isdigit() or not api_hash:
         parser.error('Preencha TG_API_ID e TG_API_HASH no .env.')
-    client = TelegramClient(str(BASE / 'monitor_ofertas'), int(api_id), api_hash, sequential_updates=True)
+    client = TelegramClient(
+        str(BASE / 'monitor_ofertas'), int(api_id), api_hash,
+        sequential_updates=False,
+    )
     captured_queue = None
     await client.start()
     try:
@@ -362,6 +383,19 @@ async def main():
 
         media_dir = BASE / 'imagens_ofertas'
         media_dir.mkdir(exist_ok=True)
+        image_janitor = ImageJanitor(
+            media_dir,
+            BASE / 'publicacoes.sqlite3',
+            retention_seconds=env_int(
+                'IMAGENS_RETENCAO_HORAS', 24, minimum=1, maximum=720
+            ) * 3600,
+            interval_seconds=env_int(
+                'IMAGENS_LIMPEZA_INTERVALO', 600, minimum=60, maximum=86400
+            ),
+        )
+        cleanup = image_janitor.cleanup(force=True)
+        if cleanup['removed']:
+            print('Limpeza de imagens temporárias:', cleanup['removed'], 'arquivo(s) removido(s).')
 
         async def save_offer_photo(photo, chat_id):
             """Baixa foto autorizada e aplica rebranding quando a origem exigir."""
@@ -396,14 +430,21 @@ async def main():
                 return None
 
         revisions = CaptureRevisions()
-        capture_lock = asyncio.Lock()
+        capture_coordinator = CaptureCoordinator(config.capture_concurrency)
 
         def queue_rows(rows):
-            return captured_queue.replace_capture(
+            inserted = captured_queue.replace_capture(
                 rows,
                 max_age_minutes=publisher_max_age,
                 recovery_max_age_minutes=recovery_publish_age,
             )
+            cleanup = image_janitor.cleanup()
+            if cleanup['ran'] and cleanup['removed']:
+                print(
+                    'Limpeza de imagens temporárias:',
+                    cleanup['removed'], 'arquivo(s) removido(s).'
+                )
+            return inserted
 
         async def capture_once(messages, chat_id, chat, digest=None, recovered=False):
             metric_id = min(m.id for m in messages)
@@ -600,14 +641,17 @@ async def main():
             save_monitor_state(recovery_state_path, recovery_state)
 
         async def capture(messages, chat_id, chat, recovered=False):
-            async with capture_lock:
+            async def operation():
                 key, digest = revisions.identity(messages, chat_id)
                 if revisions.unchanged(key, digest):
                     remember_monitor_position(chat_id, messages)
                     return
-                await capture_once(messages, chat_id, chat, digest=digest, recovered=recovered)
+                await capture_once(
+                    messages, chat_id, chat, digest=digest, recovered=recovered
+                )
                 revisions.remember(key, digest)
                 remember_monitor_position(chat_id, messages)
+            return await capture_coordinator.run(chat_id, operation)
 
         async def recover_recent_messages():
             if recovery_minutes <= 0:
@@ -680,7 +724,10 @@ async def main():
             await capture(await edited_messages(client, event), event.chat_id, await event.get_chat())
 
         await recover_recent_messages()
-        print(f'Monitorando {len(set(selected))} chats. Ctrl+C para parar.')
+        print(
+            f'Monitorando {len(set(selected))} chats | '
+            f'concorrência entre chats: {config.capture_concurrency}. Ctrl+C para parar.'
+        )
         await client.run_until_disconnected()
     finally:
         if captured_queue is not None:

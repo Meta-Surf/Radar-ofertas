@@ -9,6 +9,17 @@ Os arquivos desta pasta reproduzem a configuração operacional atualmente usada
 - virtualenv em `/opt/radar/.venv`;
 - `.env` local configurado e não versionado.
 
+## Dependências
+
+Na VPS, instale o conjunto exato validado pelo projeto:
+
+```bash
+/opt/radar/.venv/bin/python -m pip install -r /opt/radar/requirements.lock
+/opt/radar/.venv/bin/python -m pip check
+```
+
+`requirements.txt` permanece como especificação de faixas para manutenção; `requirements.lock` é a referência reprodutível para produção e CI.
+
 ## Systemd
 
 Copie os units de `deploy/systemd/` para `/etc/systemd/system/`, depois execute:

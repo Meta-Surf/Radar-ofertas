@@ -38,6 +38,7 @@ class PrePublicationGate:
         config = GateConfig.from_env()
         self.source_price_max_age = config.source_price_max_age_seconds
         self.kabum_max_age = config.kabum_feed_max_age_seconds
+        self._runtime_cache = {}
         self._init_db()
     def _init_db(self):
         self.db.executescript("""
@@ -62,6 +63,18 @@ class PrePublicationGate:
             self.db.execute(
                 "DELETE FROM prepublication_gate WHERE checked<?", (cutoff,)
             )
+
+    def _cached_value(self, key, ttl, producer):
+        now = time.monotonic()
+        cached = self._runtime_cache.get(key)
+        if cached and now - cached[0] <= max(0, float(ttl)):
+            return cached[1]
+        value = producer()
+        self._runtime_cache[key] = (now, value)
+        if len(self._runtime_cache) > 128:
+            oldest = min(self._runtime_cache, key=lambda item: self._runtime_cache[item][0])
+            self._runtime_cache.pop(oldest, None)
+        return value
 
     def _record(self, offer, status, reason, old_price="", new_price="", details=""):
         safe_details = str(details or "")[:300]
@@ -295,7 +308,9 @@ class PrePublicationGate:
                 "Gate: Offers API Awin indisponível para revalidar o cupom.", retry_after=300,
             )
         try:
-            offers = api.offers()
+            offers = self._cached_value(
+                'awin-kabum-offers', 60, api.offers
+            )
         except Exception as exc:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
