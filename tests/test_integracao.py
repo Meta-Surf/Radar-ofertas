@@ -244,6 +244,23 @@ class IntegrationTests(unittest.TestCase):
                          ['Shopee:1:1', 'Shopee:1:2'])
         self.assertEqual(rows[0]['price'], '90,00')
 
+    def test_ordered_rows_deduplicates_same_coupon_identity(self):
+        offers = [
+            dict(product_id='ShopeeCoupon:same', kind='coupon_alert',
+                 source_date='2026-01-03', chat_id=1, message_id=30),
+            dict(product_id='ShopeeCoupon:same', kind='coupon_alert',
+                 source_date='2026-01-02', chat_id=1, message_id=20),
+            dict(product_id='ShopeeCoupon:other', kind='coupon_alert',
+                 source_date='2026-01-01', chat_id=1, message_id=10),
+        ]
+        with patch.object(publisher, 'rows', return_value=iter(offers)):
+            rows = list(publisher.ordered_rows())
+        self.assertEqual(
+            [o['product_id'] for o in rows],
+            ['ShopeeCoupon:same', 'ShopeeCoupon:other'],
+        )
+        self.assertEqual(rows[0]['message_id'], 30)
+
     def test_recovery_cooldown_does_not_block_eligible_radar(self):
         now = datetime.now(timezone.utc).isoformat()
         recovered = dict(

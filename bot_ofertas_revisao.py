@@ -66,7 +66,10 @@ def ordered_rows(intelligence=None, channel=""):
     def unique(bucket):
         for offer in bucket:
             key = offer.get('product_id')
-            if offer.get('kind') != 'coupon_alert' and key:
+            # O product_id dos cupons já representa a identidade do alerta.
+            # Duplicatas append-only devem manter só a versão mais recente,
+            # exatamente como produtos comuns, para não alternar revisões/backoff.
+            if key:
                 if key in seen_products:
                     continue
                 seen_products.add(key)
