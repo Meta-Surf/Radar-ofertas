@@ -22,6 +22,7 @@ import canal_espelho as mirror
 import imagem_marca as image_branding
 from metricas_fontes import SourceMetrics
 from fila_ofertas_sqlite import CapturedOfferQueue
+from fotos_revisao import save_revision_photo
 from limpeza_imagens import ImageJanitor
 from runtime_metrics import RuntimeMetrics
 from configuracao import MonitorConfig, TelegramConfig, env_csv, env_int, secure_runtime_permissions
@@ -410,36 +411,20 @@ async def main():
         if cleanup['removed']:
             print('Limpeza de imagens temporárias:', cleanup['removed'], 'arquivo(s) removido(s).')
 
-        async def save_offer_photo(photo, chat_id):
-            """Baixa foto autorizada e aplica rebranding quando a origem exigir."""
-            target = media_dir / f'{chat_id}_{photo.id}.jpg'
+        async def save_offer_photo(photo, chat_id, digest):
+            """A revisão conserva sua foto mesmo quando a mensagem é editada."""
+            async def rebrand(path):
+                await asyncio.to_thread(image_branding.apply, path)
+                print('Imagem com rebranding aplicado:', chat_id, photo.id)
             try:
-                downloaded = await client.download_media(photo, file=str(target))
-                if not downloaded or not target.exists() or not (0 < target.stat().st_size <= 10_000_000):
-                    if target.exists():
-                        target.unlink()
-                    return None
-                if image_branding.enabled(chat_id):
-                    try:
-                        await asyncio.to_thread(image_branding.apply, target)
-                        print('Imagem com rebranding aplicado:', chat_id, photo.id)
-                    except Exception as error:
-                        # Nunca publica a arte original quando esse canal exige limpeza.
-                        if target.exists():
-                            target.unlink()
-                        logging.warning(
-                            'Rebranding visual falhou no chat %s, foto %s: %s',
-                            chat_id, photo.id, type(error).__name__,
-                        )
-                        return None
-                return str(target.relative_to(BASE))
-            except Exception:
-                if target.exists():
-                    try:
-                        target.unlink()
-                    except OSError:
-                        pass
-                logging.warning('Imagem indisponível na mensagem %s.', photo.id)
+                target = await save_revision_photo(
+                    photo, chat_id, digest, media_dir, client.download_media,
+                    rebrand if image_branding.enabled(chat_id) else None,
+                )
+                return str(target.relative_to(BASE)) if target else None
+            except Exception as error:
+                logging.warning('Imagem indisponível na mensagem %s (%s).',
+                                photo.id, type(error).__name__)
                 return None
 
         revisions = CaptureRevisions()
@@ -506,7 +491,7 @@ async def main():
                     return
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    downloaded_image = await save_offer_photo(photo, chat_id)
+                    downloaded_image = await save_offer_photo(photo, chat_id, digest)
                     if downloaded_image:
                         row['image'] = downloaded_image
                 row.update(metric_meta)
@@ -550,7 +535,7 @@ async def main():
                 image = None
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    image = await save_offer_photo(photo, chat_id)
+                    image = await save_offer_photo(photo, chat_id, digest)
                 captured_price = price_info(text) or {}
                 title = offer_title(text, exclude_call_to_action=False)
                 row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
@@ -616,7 +601,7 @@ async def main():
             if str(chat_id) in allowed_media:
                 photo = next((m for m in messages if m.photo), None)
                 if photo:
-                    image = await save_offer_photo(photo, chat_id)
+                    image = await save_offer_photo(photo, chat_id, digest)
             captured_price = price_info(text) or {}
             title = offer_title(text)
             row = {'product_id': key, 'store': store, 'url': direct_url, 'source': 'telegram',
