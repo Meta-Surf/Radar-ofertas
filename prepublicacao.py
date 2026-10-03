@@ -225,6 +225,16 @@ class PrePublicationGate:
         for key in ("name", "price", "price_condition", "price_from",
                     "api_image", "image"):
             probe.pop(key, None)
+        if (offer.get('kind') == 'ml_offer' and offer.get('source') == 'telegram'
+                and offer.get('original_url')):
+            from mercadolivre_manual import allowed_link, pending_key
+            origin = offer['original_url']
+            if allowed_link(origin):
+                # A URL canônica identifica o item, mas pode perder o caminho
+                # de sessão/redirecionamento que permitiu a leitura original.
+                # Refazer esse caminho sem herdar preço; identidade conferida abaixo.
+                probe.update(kind='ml_offer_pending', url=origin,
+                             product_id=pending_key(origin))
         try:
             fresh = self.ml_reader.read(probe, blocking=True)
         except AffiliateError as exc:
