@@ -216,13 +216,6 @@ class PrePublicationGate:
                 discard=True, retry_after=0,
             )
     def _fresh_ml(self, offer):
-        try:
-            fetched_age = time.time() - float(offer.get("auto_fetched_at") or 0)
-        except (TypeError, ValueError):
-            fetched_age = float("inf")
-        if (0 <= fetched_age <= 60 and cents(offer)
-                and offer.get("name") and (offer.get("api_image") or offer.get("image"))):
-            return dict(offer)
         if self.ml_reader is None:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
@@ -409,9 +402,10 @@ class PrePublicationGate:
                 self._compare_price(original, current, strong=False)
             else:
                 fresh = self._fresh_ml(current)
+                # Valida o preço lido antes de mesclar metadados da captura.
+                self._compare_price(original, fresh, strong=True)
                 current = self._copy_price_fields(current, fresh)
                 strong = True
-                self._compare_price(original, current, strong=True)
         elif store == "KaBuM":
             fresh = self._fresh_kabum(current)
             if fresh is not None:

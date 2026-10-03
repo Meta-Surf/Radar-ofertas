@@ -341,7 +341,9 @@ class AutoMLTests(unittest.TestCase):
                 send.assert_called_once()
                 self.assertEqual(send.call_args.args[2]['affiliate_url'], URL)
                 self.assertEqual(send.call_args.args[3], IMAGE)
-                reader.read.assert_called_once()
+                self.assertEqual(reader.read.call_count, 2)
+                self.assertTrue(reader.read.call_args.kwargs['blocking'])
+                self.assertNotIn('price', reader.read.call_args.args[0])
                 reader.close.assert_called_once()
                 shadow_row = ledger.db.execute(
                     "SELECT destination,state,source_external_id,payload FROM delivery_shadow"

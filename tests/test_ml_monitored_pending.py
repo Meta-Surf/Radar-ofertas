@@ -219,8 +219,9 @@ class MonitoredMercadoLivrePendingTests(unittest.TestCase):
                  redirect_stdout(io.StringIO()):
                 publisher.run_publisher(SimpleNamespace(simular=True), Mock())
 
-            reader.read.assert_called_once()
+            self.assertEqual(reader.read.call_count, 2)
             self.assertTrue(reader.read.call_args.kwargs['blocking'])
+            self.assertNotIn('price', reader.read.call_args.args[0])
             fake_ml.prepare.assert_called_once()
             self.assertEqual(fake_ml.prepare.call_args.args[0]['product_id'], 'MercadoLivre:123456')
             ledger.db.close()
