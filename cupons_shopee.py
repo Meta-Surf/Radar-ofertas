@@ -3,7 +3,7 @@ import hashlib
 import html
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
@@ -18,6 +18,53 @@ COUPON_RE = re.compile(r'\b(?:cupom|cupons|voucher)\b', re.I)
 CONDITION_RE = re.compile(r'R\$|\d\s*%|\b(?:OFF|selecionad\w*|categorias|acima|m[ií]nimo|v[aá]lid\w*|expira\w*|frete|primeira compra|c[oó]digo)\b', re.I)
 PROMO_RE = re.compile(r'whatsapp|telegram|\bgrupos?\b|https?://|www\.|@\w+', re.I)
 OTHER_STORE_RE = re.compile(r'\b(?:amazon|mercado\s*livre|mercadolivre|kabum|ka\s*bu\s*m)\b', re.I)
+COMMERCIAL_TZ = ZoneInfo('America/Sao_Paulo')
+DEADLINE_MARKER = re.compile(
+    r'\b(?:v[aá]lid[oa]\s+at[eé]|validade|expira[çc][aã]o|expirad[oa]|expira(?:\s+em)?|at[eé](?=\s+\d{1,2}/))\b', re.I)
+DEADLINE_DATE = re.compile(
+    r'\s*(?:at[eé]\s+|[:=]\s*)?(\d{1,2})/(\d{1,2})/(\d{4})'
+    r'(?:\s+(?:[àa]s\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?)?')
+
+
+def deadline_status(conditions, now=None):
+    """Prazo explícito: active/expired/unknown; sem prazo: unspecified.
+
+    Limite exclusivo; data sem hora vale até a meia-noite do dia seguinte.
+    Ano ausente ou timezone não reconhecido não autoriza inferência.
+    """
+    if not isinstance(conditions, str):
+        return 'unknown'
+    text = re.sub(r'\s+', ' ', html.unescape(conditions).replace('*', '')).strip()
+    markers = list(DEADLINE_MARKER.finditer(text))
+    if not markers:
+        return 'unspecified'
+    now = now or datetime.now(COMMERCIAL_TZ)
+    if now.tzinfo is None:
+        raise ValueError('Relógio de validade precisa de timezone explícito.')
+    states = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+        clause = text[marker.end():end]
+        match = DEADLINE_DATE.match(clause)
+        if not match:
+            states.append('unknown')
+            continue
+        suffix = clause[match.end():].strip(' .!;()').casefold()
+        if suffix not in ('', 'america/sao_paulo', 'horário de brasília', 'horario de brasilia'):
+            states.append('unknown')
+            continue
+        day, month, year, hour, minute, second = match.groups()
+        try:
+            deadline = datetime(int(year), int(month), int(day),
+                int(hour or 0), int(minute or 0), int(second or 0), tzinfo=COMMERCIAL_TZ)
+            if hour is None:
+                deadline += timedelta(days=1)
+            states.append('expired' if now >= deadline else 'active')
+        except (ValueError, OverflowError):
+            states.append('unknown')
+    if 'expired' in states:
+        return 'expired'
+    return 'unknown' if 'unknown' in states else 'active'
 
 def allowed(url, hosts):
     try:
@@ -105,7 +152,7 @@ def coupon_entries(messages):
     return result
 
 def alert_key(entries, source_date):
-    day = datetime.fromisoformat(source_date).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
+    day = datetime.fromisoformat(source_date).astimezone(COMMERCIAL_TZ).date().isoformat()
     identity = sorted({(e['url'], e.get('conditions', '')) for e in entries})
     digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
     return 'ShopeeCoupon:' + day + ':' + digest

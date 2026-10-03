@@ -352,6 +352,7 @@ class PrePublicationGate:
                     "Gate: lista de cupons Mercado Livre inválida.", retry_after=300,
                 )
         if store == "Shopee":
+            from cupons_shopee import alert_key, deadline_status
             entries = prepared.get("entries") or []
             if (not entries or any(not isinstance(entry, dict) for entry in entries)
                     or any(
@@ -362,6 +363,21 @@ class PrePublicationGate:
                     prepared, "LINK_INVALIDO",
                     "Gate: cupom Shopee sem links de afiliado válidos.", retry_after=300,
                 )
+            now = datetime.now(timezone.utc)
+            states = [deadline_status(entry.get('conditions', ''), now) for entry in entries]
+            eligible = [entry for entry, state in zip(entries, states)
+                        if state in ('active', 'unspecified')]
+            if not eligible:
+                if 'unknown' in states:
+                    self.reject(prepared, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: prazo declarado do cupom Shopee não pôde ser confirmado.',
+                        retry_after=300)
+                self.reject(prepared, 'CUPOM_EXPIRADO',
+                    'Gate: prazo explícito dos cupons Shopee já encerrou.',
+                    discard=True, retry_after=0)
+            if len(eligible) != len(entries):
+                prepared = dict(prepared, entries=eligible,
+                    product_id=alert_key(eligible, prepared['source_date']))
             if self._age_seconds(original) > self.source_price_max_age:
                 self.reject(
                     prepared, "CUPOM_NAO_REVALIDADO",

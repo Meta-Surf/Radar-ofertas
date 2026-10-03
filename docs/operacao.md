@@ -428,3 +428,18 @@ são recusadas porque não é possível reconstruir `edit_date` não armazenado.
 A proteção vale enquanto a origem está persistida na fila; a deduplicação de
 publicações após consumo/expiração continua sendo responsabilidade do ledger.
 Um rollback de código pode ignorar as colunas extras, mas perde esta proteção.
+
+### Validade textual dos cupons Shopee
+
+O Gate avalia o prazo explícito nas condições de cada entrada, usando
+America/Sao_Paulo, também usado na identidade diária do alerta. Datas completas
+DD/MM/AAAA podem vir após “válido até”, “expira em”, “expira” ou “validade:”,
+com hora HH:MM opcional. O limite com hora é exclusivo: agora >= prazo bloqueia.
+Sem hora, vale até a meia-noite do dia seguinte. Não se infere ano ausente.
+
+Prazo vencido gera CUPOM_EXPIRADO; declaração não interpretável gera
+CUPOM_VALIDADE_NAO_CONFIRMADA com backoff. Sem declaração de prazo permanece a
+política atual de recência, sem inventar expiração ou comprovar atividade comercial
+pela geração do afiliado. Listas independentes preservam apenas entradas elegíveis,
+com identidade recalculada; condições e links permanecem associados. Se nenhuma
+entrada for elegível, o alerta é bloqueado. Nova revisão pode ser reavaliada.
