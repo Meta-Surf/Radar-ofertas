@@ -723,7 +723,7 @@ def production_candidates(db, minimum_pct=5, limit=20, max_age_hours=24,
         out.append(offer)
 
     out.sort(key=lambda item: (-item["radar_score"], item["product_id"]))
-    return out[:max(1, int(limit))]
+    return out if limit is None else out[:max(1, int(limit))]
 
 
 def production_round(base=None, channel="", minimum_pct=None, limit=None, max_age_hours=None):
@@ -784,7 +784,7 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
             if max_age_hours is None else max(1, float(max_age_hours))
         )
         candidates = production_candidates(
-            db, minimum_pct=minimum_pct, limit=limit, max_age_hours=max_age,
+            db, minimum_pct=minimum_pct, limit=None, max_age_hours=max_age,
             availability=availability, official_offers=official,
         )
     finally:
@@ -793,6 +793,10 @@ def production_round(base=None, channel="", minimum_pct=None, limit=None, max_ag
     ledger = Ledger(base / "publicacoes.sqlite3")
     try:
         intelligence = Intelligence(ledger.db)
+        # Aplicar o limite depois da deduplicação: produtos já divulgados
+        # não podem ocupar todas as vagas e esconder candidatos novos.
+        candidates = [offer for offer in candidates
+                      if intelligence.publication_eligible(offer, channel)][:limit]
         intelligence.enqueue(candidates + coupon_alerts)
         pending = list(intelligence.pending(channel))
         kabum_pending = [

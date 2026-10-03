@@ -164,6 +164,13 @@ class Intelligence:
             self.db.execute('INSERT OR REPLACE INTO radar_rotation VALUES (?,?)',
                             (offer['tema_radar'], now))
 
+    def publication_eligible(self, offer, channel='', now=None):
+        """Mesma regra de seleção da fila, sem reservar ou modificar histórico."""
+        states = self.db.execute('SELECT status FROM posts WHERE product=?',
+                                 (offer['product_id'],)).fetchall()
+        return not states or (all(state[0] == 'sent' for state in states)
+                              and self.can_repeat(offer, channel, now))
+
     def pending(self, channel='', now=None):
         now = time.time() if now is None else now
         with self.db:
@@ -171,8 +178,7 @@ class Intelligence:
         offers = []
         for product, payload in self.db.execute('SELECT product,payload FROM radar_queue'):
             offer = json.loads(payload)
-            states = self.db.execute('SELECT status FROM posts WHERE product=?', (product,)).fetchall()
-            if states and (any(s[0] != 'sent' for s in states) or not self.can_repeat(offer, channel, now)):
+            if not self.publication_eligible(offer, channel, now):
                 continue
             offers.append(offer)
         rotation = dict(self.db.execute('SELECT theme,published FROM radar_rotation'))
