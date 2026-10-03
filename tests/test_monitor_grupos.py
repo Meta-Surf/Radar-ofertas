@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -261,8 +261,10 @@ class CaptureFlowTests(unittest.TestCase):
         client.download_media = download
         async def events():
             await handlers['NewMessage'](event)
+            msg.edit_date = msg.date + timedelta(seconds=1)
             await handlers['MessageEdited'](event)
             msg.raw_text = EXAMPLE.replace('R$ 113', 'R$ 109')
+            msg.edit_date = msg.date + timedelta(seconds=2)
             await handlers['MessageEdited'](event)
         client.run_until_disconnected = events
         with tempfile.TemporaryDirectory() as directory, \

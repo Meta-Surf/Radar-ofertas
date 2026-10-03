@@ -95,6 +95,15 @@ def dialog_is_configured(dialog, configured):
     return bool(dialog_config_keys(dialog) & set(configured))
 
 
+def source_revision_metadata(messages):
+    ordered = sorted(messages, key=lambda m: m.id)
+    stamps = [(m.id, getattr(m, 'edit_date', None) or m.date) for m in ordered]
+    return {
+        'source_revision_at': max(stamp for _, stamp in stamps).isoformat(),
+        'source_revision_members': [(key, stamp.isoformat()) for key, stamp in stamps],
+    }
+
+
 def source_metric_context(chat_id, chat, messages):
     username = str(getattr(chat, 'username', '') or '').strip()
     name = str(getattr(chat, 'title', '') or getattr(chat, 'name', '') or username or chat_id)
@@ -102,6 +111,7 @@ def source_metric_context(chat_id, chat, messages):
         'source_name': name,
         'source_username': username or None,
         'source_date': messages[0].date.isoformat() if messages else None,
+        **source_revision_metadata(messages),
     }
 
 
@@ -636,6 +646,11 @@ async def main():
                           max(m.id for m in messages))
             activity = max((getattr(m, 'edit_date', None) or m.date for m in messages),
                            default=datetime.now(timezone.utc))
+            if previous.get('last_activity_at'):
+                try:
+                    activity = max(activity, datetime.fromisoformat(previous['last_activity_at']))
+                except (ValueError, TypeError):
+                    pass
             recovery_state[key] = {
                 'last_message_id': last_id,
                 'last_activity_at': activity.isoformat(),
@@ -644,11 +659,18 @@ async def main():
             save_monitor_state(recovery_state_path, recovery_state)
 
         async def capture(messages, chat_id, chat, recovered=False):
+            messages = sorted(messages, key=lambda m: m.id)
             async def operation():
                 key, digest = revisions.identity(messages, chat_id)
-                if revisions.unchanged(key, digest):
+                if (revisions.unchanged(key, digest)
+                        or (recovered and captured_queue.revision_matches(chat_id, key[1], digest))):
+                    captured_queue.advance_revision(
+                        chat_id, key[1], digest,
+                        source_revision_metadata(messages), recovered=recovered,
+                    )
+                    revisions.remember(key, digest)
                     remember_monitor_position(chat_id, messages)
-                    return
+                    return False
                 started = time.perf_counter()
                 outcome = 'ok'
                 try:
@@ -658,6 +680,7 @@ async def main():
                     )
                     revisions.remember(key, digest)
                     remember_monitor_position(chat_id, messages)
+                    return True
                 except Exception:
                     outcome = 'error'
                     raise
@@ -674,7 +697,6 @@ async def main():
                 print('Recuperação inicial de mensagens: desativada por TG_RECUPERAR_MINUTOS=0.')
                 return
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=recovery_minutes)
-            queued = captured_queue.revision_digests()
             scanned = recovered = already_queued = failures = 0
             print(f'Recuperando mensagens dos últimos {recovery_minutes} minutos '
                   f'(até {recovery_limit} por chat)...')
@@ -706,15 +728,11 @@ async def main():
                 scanned += len(batches)
                 for messages in batches.values():
                     identity, digest = revisions.identity(messages, chat_id)
-                    queue_key = (str(chat_id), identity[1])
-                    if queued.get(queue_key) == digest:
-                        revisions.remember(identity, digest)
-                        remember_monitor_position(chat_id, messages)
-                        already_queued += 1
-                        continue
                     try:
-                        await capture(messages, chat_id, dialog.entity, recovered=True)
-                        recovered += 1
+                        if await capture(messages, chat_id, dialog.entity, recovered=True):
+                            recovered += 1
+                        else:
+                            already_queued += 1
                     except Exception as error:
                         failures += 1
                         print('Recuperação inicial: falha ao reprocessar mensagem',

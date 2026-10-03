@@ -7,15 +7,50 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def _source_timestamp(offer):
+def _timestamp(value):
     try:
-        value = str(offer.get("source_date") or "")
-        stamp = datetime.fromisoformat(value)
+        stamp = datetime.fromisoformat(str(value or ""))
         if stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=timezone.utc)
         return stamp.timestamp()
     except (TypeError, ValueError):
         return 0.0
+
+
+def _source_timestamp(offer):
+    return _timestamp(offer.get("source_date"))
+
+
+def _revision(offer):
+    # Tempo da origem, nunca o horário em que o callback terminou.
+    stamp = (_timestamp(offer.get("source_revision_at"))
+             or _timestamp(offer.get("edit_date")) or _source_timestamp(offer))
+    members = offer.get("source_revision_members") or []
+    return stamp, members
+
+
+def _can_replace(offer, previous):
+    stamp, members = _revision(offer)
+    old_stamp, old_members, old_digest, old_recovered = previous
+    # Uma linha legada pode ter sido editada sem persistir edit_date.
+    # Não inferir a última revisão a partir da data de criação da mensagem.
+    if old_stamp is None:
+        return False
+    old_members = json.loads(old_members or "[]")
+    current = {int(key): _timestamp(value) for key, value in members}
+    old = {int(key): _timestamp(value) for key, value in old_members}
+    # Um álbum parcial ou com um integrante mais antigo não é uma revisão nova.
+    if current and old and any(current.get(key, -1) < value for key, value in old.items()):
+        return False
+    if stamp != old_stamp:
+        return stamp > old_stamp
+    if current and old and any(current.get(key, 0) > value for key, value in old.items()):
+        return True
+    if offer.get("capture_digest") and offer["capture_digest"] == old_digest:
+        return False
+    # O Telegram tem resolução de segundos. Sem ordem nativa adicional,
+    # live vence recovery; conflitos da mesma classe preservam o persistido.
+    return bool(old_recovered and not offer.get("recovered"))
 
 
 def _queue_key(offer):
@@ -66,6 +101,27 @@ class CapturedOfferQueue:
             """
         )
         self.db.commit()
+        # Migração aditiva, serializada também entre processos concorrentes.
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in self.db.execute("PRAGMA table_info(captured_queue)")}
+            if "source_revision_at" not in columns:
+                self.db.execute("ALTER TABLE captured_queue ADD COLUMN source_revision_at REAL")
+                self.db.execute("ALTER TABLE captured_queue ADD COLUMN source_revision_members TEXT")
+                for key, payload in self.db.execute("SELECT queue_key,payload FROM captured_queue").fetchall():
+                    try:
+                        offer = json.loads(payload)
+                    except (TypeError, ValueError):
+                        offer = {}
+                    if not isinstance(offer, dict):
+                        offer = {}
+                    stamp, members = _revision(offer)
+                    if not (_timestamp(offer.get("source_revision_at")) or _timestamp(offer.get("edit_date"))):
+                        stamp = None
+                    self.db.execute(
+                        "UPDATE captured_queue SET source_revision_at=?,source_revision_members=? WHERE queue_key=?",
+                        (stamp, json.dumps(members), key),
+                    )
 
 
     def close(self):
@@ -103,7 +159,16 @@ class CapturedOfferQueue:
 
         inserted = 0
         with self.db:
+            # A leitura da revisão e a substituição formam uma única transação.
+            self.db.execute("BEGIN IMMEDIATE")
             for (chat_id, message_id), batch in groups.items():
+                previous = self.db.execute(
+                    "SELECT source_revision_at,source_revision_members,capture_digest,recovered "
+                    "FROM captured_queue WHERE chat_id=? AND message_id=?",
+                    (chat_id, message_id),
+                ).fetchall()
+                if previous and not all(_can_replace(batch[0], row) for row in previous):
+                    continue
                 self.db.execute(
                     "DELETE FROM captured_queue WHERE chat_id=? AND message_id=?",
                     (chat_id, message_id),
@@ -129,11 +194,13 @@ class CapturedOfferQueue:
         if expires_at <= now:
             return 0
         payload = json.dumps(offer, ensure_ascii=False, separators=(",", ":"))
+        stamp, members = _revision(offer)
         self.db.execute(
             """INSERT INTO captured_queue
                (queue_key,product,chat_id,message_id,payload,capture_digest,
-                source_date,recovered,enqueued_at,updated_at,expires_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                source_date,recovered,enqueued_at,updated_at,expires_at,
+                source_revision_at,source_revision_members)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(queue_key) DO UPDATE SET
                  product=excluded.product,
                  chat_id=excluded.chat_id,
@@ -143,7 +210,9 @@ class CapturedOfferQueue:
                  source_date=excluded.source_date,
                  recovered=excluded.recovered,
                  updated_at=excluded.updated_at,
-                 expires_at=excluded.expires_at""",
+                 expires_at=excluded.expires_at,
+                 source_revision_at=excluded.source_revision_at,
+                 source_revision_members=excluded.source_revision_members""",
             (
                 _queue_key(offer),
                 product,
@@ -156,9 +225,43 @@ class CapturedOfferQueue:
                 now,
                 now,
                 expires_at,
+                stamp,
+                json.dumps(members, separators=(",", ":")),
             ),
         )
         return 1
+
+
+    def revision_matches(self, chat_id, message_id, digest):
+        rows = self.db.execute(
+            "SELECT capture_digest FROM captured_queue WHERE chat_id=? AND message_id=? AND expires_at>?",
+            (str(chat_id), int(message_id), self.now()),
+        ).fetchall()
+        return bool(rows and all(row[0] == digest for row in rows))
+
+
+    def advance_revision(self, chat_id, message_id, digest, metadata, *, recovered=False):
+        """Atualiza só a autoridade nativa de conteúdo idêntico, sem nova validação."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            rows = self.db.execute(
+                "SELECT queue_key,payload,source_revision_at,source_revision_members,"
+                "capture_digest,recovered FROM captured_queue WHERE chat_id=? AND message_id=?",
+                (str(chat_id), int(message_id)),
+            ).fetchall()
+            incoming = dict(metadata, capture_digest=digest, recovered=recovered)
+            if not rows or any(row[4] != digest or not _can_replace(incoming, row[2:]) for row in rows):
+                return False
+            stamp, members = _revision(incoming)
+            for key, payload, *_ in rows:
+                offer = json.loads(payload)
+                offer.update(metadata, recovered=recovered)
+                self.db.execute(
+                    "UPDATE captured_queue SET source_revision_at=?,source_revision_members=?,"
+                    "recovered=?,payload=? WHERE queue_key=?",
+                    (stamp, json.dumps(members), int(bool(recovered)), json.dumps(offer, ensure_ascii=False), key),
+                )
+        return True
 
 
     def prune(self, now=None):

@@ -383,3 +383,33 @@ py -m unittest discover -p "test_*.py" -v
 - não abrir duas instâncias do mesmo componente;
 - não apagar o banco para forçar republicação;
 - não publicar dados estimados quando a fonte não comprovar o valor.
+
+## Revisões de captura e recovery
+
+A origem da captura é `(chat_id, message_id)`; em álbuns, `message_id` é o
+menor ID do conjunto ordenado. A fila persiste `source_revision_at` (epoch UTC)
+e `source_revision_members` (IDs e timestamps nativos), também no payload.
+Cada mensagem usa `edit_date` quando disponível, senão `date`; o timestamp
+do álbum é o máximo dos integrantes. `captured_at` não determina frescor.
+
+A comparação e a substituição do lote usam uma transação SQLite
+`BEGIN IMMEDIATE`. Timestamp menor é recusado; maior pode substituir, desde
+que nenhum integrante conhecido do álbum tenha regredido ou desaparecido.
+Em empate, avanço comprovado nos timestamps dos integrantes vence; mesma
+revisão/digest é no-op; digest diferente prefere live a recovery. Conflitos
+live/live ou recovery/recovery sem ordem nativa comprovável preservam o
+conteúdo persistido: edições distintas no mesmo segundo podem exigir uma
+nova edição posterior para atualizar a fila.
+
+Conteúdo idêntico com timestamp nativo maior atualiza apenas os metadados
+da revisão, preservando TTL e sem repetir resolução de links. A posição do
+monitor também mantém a maior atividade nativa, mesmo após recovery antigo.
+
+A migração adiciona duas colunas sem remover dados ou índices. Linhas antigas
+usam o timestamp de revisão explícito do payload, quando existir. Se não houver,
+`source_revision_at` permanece NULL: `source_date` não comprova a última edição.
+Essas linhas preservam o conteúdo até consumo/expiração normal; substituições
+são recusadas porque não é possível reconstruir `edit_date` não armazenado.
+A proteção vale enquanto a origem está persistida na fila; a deduplicação de
+publicações após consumo/expiração continua sendo responsabilidade do ledger.
+Um rollback de código pode ignorar as colunas extras, mas perde esta proteção.

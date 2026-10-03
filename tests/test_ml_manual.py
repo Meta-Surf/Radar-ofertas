@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -151,6 +151,7 @@ class ManualMLTests(unittest.TestCase):
             await handlers['NewMessage'](event)
             await handlers['MessageEdited'](event)
             msg.raw_text = TEXT.replace('1.103,08', '999,00')
+            msg.edit_date = msg.date + timedelta(seconds=1)
             await handlers['MessageEdited'](event)
         client.run_until_disconnected = events
         with tempfile.TemporaryDirectory() as directory, \
