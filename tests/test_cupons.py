@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import json
 import tempfile
 import unittest
@@ -231,12 +232,12 @@ class CouponTests(unittest.TestCase):
             ],
         )
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             ledger.mark_attempt(600, clock_id=2)
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env'), \
-                 patch.object(publisher, 'rows', side_effect=[iter([raw]), iter([raw])]), \
+                 patch.object(publisher, 'rows', side_effect=[persisted_rows([raw], directory), persisted_rows([raw], directory)]), \
                  patch.object(publisher, 'prepare_alert', return_value=ready) as prepare, \
                  patch.object(publisher, 'send_alert', return_value=(42, 0)) as send, \
                  patch.object(publisher, 'banner_path', return_value=None), \

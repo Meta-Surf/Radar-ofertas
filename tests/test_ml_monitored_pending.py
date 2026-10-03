@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import asyncio
 import io
 import json
@@ -205,12 +206,12 @@ class MonitoredMercadoLivrePendingTests(unittest.TestCase):
         reader.read.return_value = ready
 
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('sem Shopee')), \
                  patch.object(publisher.MercadoLivreAffiliate, 'from_env', return_value=fake_ml), \
-                 patch.object(publisher, 'rows', return_value=iter([pending])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([pending], directory)), \
                  patch.object(auto, 'AutoReader', return_value=reader), \
                  patch.dict(os.environ, {
                      'TELEGRAM_TOKEN': 'fake',

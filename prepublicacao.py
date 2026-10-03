@@ -15,6 +15,7 @@ from amazon_afiliados import valid_affiliate_url as valid_amazon_link
 import cupons_kabum
 import cupons_mercadolivre as ml_coupons
 from configuracao import GateConfig
+from revisao_publicacao import catalog_digest
 
 
 class GateReject(AffiliateError):
@@ -255,11 +256,13 @@ class PrePublicationGate:
                 "Gate: ID KaBuM inválido.", discard=True,
             )
         product_id = key.split(":", 1)[1]
+        self.kabum_revision = {'product_id': product_id, 'digest': None}
         path = self.base / "kabum_historico.sqlite3"
         try:
             db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+            db.row_factory = sqlite3.Row
             row = db.execute(
-                """SELECT name,price_cents,affiliate_url,image_url,in_stock,last_seen
+                """SELECT *
                    FROM kabum_products WHERE product_id=?""",
                 (product_id,),
             ).fetchone()
@@ -272,7 +275,10 @@ class PrePublicationGate:
                 pass
         if not row:
             return None
-        name, price_cents, affiliate, image, stock, last_seen = row
+        self.kabum_revision['digest'] = catalog_digest(dict(row))
+        name, price_cents, affiliate, image, stock, last_seen = (
+            row[key] for key in ('name','price_cents','affiliate_url','image_url','in_stock','last_seen'))
+        self.kabum_revision['expires'] = float(last_seen or 0) + self.kabum_max_age
         if time.time() - float(last_seen or 0) > self.kabum_max_age:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
@@ -434,6 +440,7 @@ class PrePublicationGate:
                 strong = True
         elif store == "KaBuM":
             fresh = self._fresh_kabum(current)
+            current['_catalog_revision'] = self.kabum_revision
             if fresh is not None:
                 current = self._copy_price_fields(current, fresh)
                 strong = True

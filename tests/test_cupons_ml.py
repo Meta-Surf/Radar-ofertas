@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import io
 import tempfile
 import unittest
@@ -119,11 +120,11 @@ class MLCouponTests(unittest.TestCase):
     def test_publisher_sends_once_without_shopee_credentials_or_affiliate_links(self):
         row = build()
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
-                 patch.object(publisher, 'rows', side_effect=[iter([row]), iter([row])]), \
+                 patch.object(publisher, 'rows', side_effect=[persisted_rows([row], directory), persisted_rows([row], directory)]), \
                  patch.object(ml, 'send_alert', return_value=(42, 0)) as send, \
                  patch.object(ml, 'banner_path', return_value=None), \
                  patch.object(publisher.time, 'sleep', side_effect=[None, KeyboardInterrupt]), \

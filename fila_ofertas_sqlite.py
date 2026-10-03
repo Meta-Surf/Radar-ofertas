@@ -5,6 +5,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from revisao_publicacao import selection, discard_selected
 
 
 def _timestamp(value):
@@ -278,24 +279,29 @@ class CapturedOfferQueue:
                 "DELETE FROM captured_queue WHERE expires_at<=?", (now,)
             ).rowcount
 
-    def pending(self, now=None):
+    def pending(self, now=None, *, include_selection=False):
         now = self.now() if now is None else float(now)
         self.prune(now)
         rows = self.db.execute(
-            """SELECT payload FROM captured_queue
+            """SELECT queue_key,payload FROM captured_queue
                WHERE expires_at>?
                ORDER BY COALESCE(source_date,''), updated_at""",
             (now,),
         ).fetchall()
         out = []
-        for payload, in rows:
+        for queue_key, payload in rows:
             try:
                 value = json.loads(payload)
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             if isinstance(value, dict):
+                if include_selection:
+                    value['_queue_selection'] = selection('captured_queue', queue_key, payload)
                 out.append(value)
         return out
+
+    def discard_selected(self, selected):
+        return discard_selected(self.db, selected)
 
     def revision_digests(self, now=None):
         now = self.now() if now is None else float(now)

@@ -400,6 +400,9 @@ class Ledger:
                 self.db.execute(f'ALTER TABLE posts ADD COLUMN {name} {kind}')
         self.db.execute('CREATE INDEX IF NOT EXISTS posts_status_idx ON posts(status)')
         self.db.execute('CREATE TABLE IF NOT EXISTS publication_clock (id INTEGER PRIMARY KEY, next_at REAL NOT NULL)')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS publication_selections (
+          product TEXT NOT NULL, day TEXT NOT NULL, selection TEXT NOT NULL,
+          PRIMARY KEY(product,day))''')
         self.deliveries = DeliveryOutbox(self.db)
         self.db.commit()
 
@@ -434,7 +437,7 @@ class Ledger:
             'uncertain_total': pending_uncertain,
         }
 
-    def reserve(self, product_id, moment=None, offer=None, channel=""):
+    def reserve(self, product_id, moment=None, offer=None, channel="", *, selected=None):
         from inteligencia_ofertas import Intelligence
         intelligence = Intelligence(self.db)
         day = (moment or datetime.now(ZoneInfo('America/Sao_Paulo'))).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
@@ -443,6 +446,11 @@ class Ledger:
         # Serializa limpeza, verificação e reserva entre processos concorrentes.
         self.db.execute('BEGIN IMMEDIATE')
         try:
+            if selected is not None:
+                from revisao_publicacao import matches
+                if not matches(self.db, selected, now=now):
+                    self.db.rollback()
+                    return None
             self.db.execute(
                 """DELETE FROM posts
                    WHERE status='reserved'
@@ -464,13 +472,36 @@ class Ledger:
                    VALUES (?,?,?,NULL,?,NULL,?)""",
                 (product_id, day, 'reserved', now, now),
             )
+            if result.rowcount and selected is not None:
+                from revisao_publicacao import selection_id
+                self.db.execute('INSERT OR REPLACE INTO publication_selections VALUES (?,?,?)',
+                                (product_id, day, selection_id(selected)))
             self.db.commit()
         except BaseException:
             self.db.rollback()
             raise
         return day if result.rowcount else None
 
-    def mark_sending(self, product_id, day):
+    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None):
+        if selected is not None:
+            from revisao_publicacao import catalog_guard, immediate, matches, selection_id
+            # O commit de reserved -> sending é a fronteira de autorização.
+            # O catálogo permanece bloqueado até esse commit, sem escrever nele.
+            with catalog_guard(catalog_path, catalog_proof) as source_matches:
+                with immediate(self.db):
+                    binding = self.db.execute(
+                        'SELECT selection FROM publication_selections WHERE product=? AND day=?',
+                        (product_id, day)).fetchone()
+                    if not binding or binding[0] != selection_id(selected):
+                        return False
+                    if not source_matches or not matches(self.db, selected):
+                        self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                        (product_id, day))
+                        return False
+                    return bool(self.db.execute(
+                        "UPDATE posts SET status='sending',send_started_at=?,updated_at=? "
+                        "WHERE product=? AND day=? AND status='reserved'",
+                        (time.time(), time.time(), product_id, day)).rowcount)
         now = time.time()
         with self.db:
             result = self.db.execute(
@@ -480,6 +511,16 @@ class Ledger:
                 (now, now, product_id, day),
             )
         return bool(result.rowcount)
+
+    def cancel_reserved_selection(self, product_id, day, selected):
+        """Erro pré-envio não libera outra reserva, SENDING, UNCERTAIN ou SENT."""
+        from revisao_publicacao import immediate, selection_id
+        with immediate(self.db):
+            return self.db.execute(
+                "DELETE FROM posts WHERE product=? AND day=? AND status='reserved' "
+                "AND EXISTS(SELECT 1 FROM publication_selections s WHERE "
+                "s.product=posts.product AND s.day=posts.day AND s.selection=?)",
+                (product_id,day,selection_id(selected))).rowcount
 
     def mark_uncertain(self, product_id, day, *, offer=None, channel=""):
         now = time.time()
@@ -497,10 +538,24 @@ class Ledger:
                 )
         return bool(result.rowcount)
 
-    def finish(self, product_id, day, message_id, offer=None, channel=""):
+    def finish(self, product_id, day, message_id, offer=None, channel="", *, selected=None):
         from inteligencia_ofertas import Intelligence
         intelligence = Intelligence(self.db)
-        with self.db:
+        from revisao_publicacao import immediate, selection_id, discard_selected
+        with immediate(self.db):
+            if selected is not None:
+                row = self.db.execute(
+                    'SELECT p.status,p.message_id,s.selection FROM posts p '
+                    'JOIN publication_selections s ON p.product=s.product AND p.day=s.day '
+                    'WHERE p.product=? AND p.day=?', (product_id, day)).fetchone()
+                if not row or row[2] != selection_id(selected):
+                    raise ValueError('Confirmação não corresponde à revisão autorizada')
+                if row[0] == 'sent':
+                    if str(row[1]) == str(message_id):
+                        return
+                    raise ValueError('Confirmação SENT possui outro message_id')
+                if row[0] not in ('sending', 'uncertain'):
+                    raise ValueError('Revisão ainda não autorizada para envio')
             self.db.execute(
                 """UPDATE posts SET status=?, message_id=?, updated_at=?
                    WHERE product=? AND day=?""",
@@ -512,7 +567,9 @@ class Ledger:
                 payload=offer, commit=False,
             )
             if offer and offer.get('kind') != 'coupon_alert':
-                intelligence.record(offer, channel, message_id)
+                intelligence.record(offer, channel, message_id, selected=selected)
+            if selected is not None:
+                discard_selected(self.db, selected)
 
     def release(self, product_id, day):
         """Libera apenas estados cujo não-envio é conhecido; nunca remove uncertain."""

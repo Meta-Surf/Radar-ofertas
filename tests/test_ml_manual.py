@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import io
 import json
 import os
@@ -106,12 +107,12 @@ class ManualMLTests(unittest.TestCase):
     def test_manual_publisher_works_without_shopee_and_sends_only_once(self):
         row = ml.build_offer(messages(), CHAT)
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             ledger.mark_attempt(600, clock_id=2)
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
-                 patch.object(publisher, 'rows', side_effect=[iter([row]), iter([row])]), \
+                 patch.object(publisher, 'rows', side_effect=[persisted_rows([row], directory), persisted_rows([row], directory)]), \
                  patch.object(publisher, 'send', return_value=(42, 0)) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=[None, KeyboardInterrupt]), \
                  patch.dict(os.environ, {'TELEGRAM_TOKEN': 'fake', 'TELEGRAM_CANAL': '@fake', 'EXIGIR_IMAGEM': '0'}), \

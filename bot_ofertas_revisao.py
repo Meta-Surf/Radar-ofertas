@@ -1,6 +1,7 @@
 """Publicação Shopee com link gerado pela API de Afiliados. --simular não publica."""
 import argparse
 import json
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,7 @@ from publisher_backoff import PublisherBackoff, offer_revision
 from fila_ofertas_sqlite import CapturedOfferQueue
 from multicanal_shadow import ShadowDistribution
 from runtime_metrics import RuntimeMetrics
+from revisao_publicacao import retry_key
 from configuracao import (DistributionConfig, PublisherConfig, TelegramConfig,
                           secure_runtime_permissions)
 
@@ -42,7 +44,7 @@ def rows(captured_queue=None):
             max_age_minutes=config.offer_max_age_minutes,
             recovery_max_age_minutes=config.recovered_max_age_minutes,
         )
-        yield from queue.pending()
+        yield from queue.pending(include_selection=True)
     finally:
         if own_queue:
             queue.close()
@@ -86,7 +88,7 @@ def ordered_rows(intelligence=None, channel="", captured_queue=None):
     if intelligence is None:
         yield from unique(radar)
     else:
-        yield from unique(intelligence.pending(channel))
+        yield from unique(intelligence.pending(channel, include_selection=True))
 
 def photo_path(offer):
     value = offer.get('image')
@@ -214,8 +216,11 @@ def run_publisher(args, parser):
                     time.sleep(min(delay, 1))
                     continue
             for offer in ordered_rows(intelligence, channel, captured_queue):
+                offer = dict(offer)
+                selected = offer.pop('_queue_selection', None)
+                row_backoff = backoff.for_selection(selected)
                 key = offer.get('product_id')
-                source_key = key
+                source_key = retry_key(selected) if selected else key
                 revision = json.dumps(offer, sort_keys=True, ensure_ascii=False, default=str)
                 revision_id = offer_revision(offer)
                 if source_key in gate_blocked:
@@ -223,7 +228,7 @@ def run_publisher(args, parser):
                         continue
                     del gate_blocked[source_key]
                 if (not args.simular and isinstance(source_key, str)
-                        and backoff.remaining(source_key, revision_id) > 0):
+                        and row_backoff.remaining(source_key, revision_id) > 0):
                     continue
                 original_offer = dict(offer)
                 is_coupon = offer.get('kind') == 'coupon_alert'
@@ -243,37 +248,37 @@ def run_publisher(args, parser):
                     if marker not in announced:
                         print('Oferta Mercado Livre captada, mas o gerador de afiliado está indisponível:', key)
                         announced.add(marker)
-                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 if is_kabum_offer and kabum_affiliate is None:
-                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 if is_amazon_offer and amazon_affiliate is None:
-                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 if not (is_ml_offer or is_ml_pending or is_kabum_offer or is_amazon_offer) and affiliate is None and not is_ml_coupon and not is_ml_manual:
-                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'AFILIADO_INDISPONIVEL', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 if is_ml_manual:
                     if not ml_manual.trusted(offer.get('chat_id')):
-                        metrics.record_offer(offer, 'REJEITADA', 'ORIGEM_NAO_AUTORIZADA')
+                        metrics.record_offer(offer, 'REJEITADA', 'ORIGEM_NAO_AUTORIZADA', selected=selected)
                         gate_blocked[source_key] = revision
                         continue
                 elif is_ml_pending:
                     if (not ml_manual.allowed_link(offer.get('url'))
                             or offer.get('product_id') != ml_manual.pending_key(offer['url'])):
-                        metrics.record_offer(offer, 'REJEITADA', 'LINK_INVALIDO')
+                        metrics.record_offer(offer, 'REJEITADA', 'LINK_INVALIDO', selected=selected)
                         gate_blocked[source_key] = revision
                         continue
                     offer['store'] = 'Mercado Livre'
                 elif not is_coupon:
                     checked = product(offer.get('url', ''))
                     if not checked or checked[0] != key or checked[2] != offer['url']:
-                        metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
+                        metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE', selected=selected)
                         gate_blocked[source_key] = revision
                         continue
                     offer['store'] = checked[1]
@@ -281,22 +286,22 @@ def run_publisher(args, parser):
                         if key not in announced:
                             print('Aguardando integração de afiliados da loja:', checked[1])
                             announced.add(key)
-                        metrics.record_offer(offer, 'AGUARDANDO', 'LOJA_NAO_INTEGRADA')
+                        metrics.record_offer(offer, 'AGUARDANDO', 'LOJA_NAO_INTEGRADA', selected=selected)
                         gate_blocked[source_key] = revision
                         continue
                     if checked[1] == 'Mercado Livre' and not is_ml_offer:
-                        metrics.record_offer(offer, 'REJEITADA', 'FLUXO_ML_INVALIDO')
+                        metrics.record_offer(offer, 'REJEITADA', 'FLUXO_ML_INVALIDO', selected=selected)
                         gate_blocked[source_key] = revision
                         continue
                 try:
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(offer['source_date'])).total_seconds()
                 except (KeyError, TypeError, ValueError):
-                    metrics.record_offer(offer, 'REJEITADA', 'DATA_INVALIDA')
+                    metrics.record_offer(offer, 'REJEITADA', 'DATA_INVALIDA', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 allowed_age = min(max_age, recovery_max_age) if is_recovered else max_age
                 if age < -60 or age > allowed_age * 60:
-                    metrics.record_offer(offer, 'REJEITADA', 'EXPIRADA')
+                    metrics.record_offer(offer, 'REJEITADA', 'EXPIRADA', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
 
@@ -310,9 +315,9 @@ def run_publisher(args, parser):
                         any(state[0] != 'sent' for state in states)
                         or not intelligence.can_repeat(offer, channel)
                     ):
+                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA_PRE_FILTRO', selected=selected)
                         if all(state[0] == 'sent' for state in states):
-                            captured_queue.discard_product(source_key)
-                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA_PRE_FILTRO')
+                            captured_queue.discard_selected(selected)
                         gate_blocked[source_key] = revision
                         continue
 
@@ -329,19 +334,21 @@ def run_publisher(args, parser):
                             )
                             announced.add(marker)
                         metrics.record_offer(
-                            offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO_BLOQUEADA'
-                        )
+                            offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO_BLOQUEADA', selected=selected)
                         continue
 
                 if is_ml_manual or is_ml_offer or is_ml_pending:
                     if is_ml_manual and not args.simular and ledger.db.execute('SELECT 1 FROM posts WHERE product=?', (key,)).fetchone():
-                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
+                        metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA', selected=selected)
                         continue
                     needs_public_data = (is_ml_pending or (not is_mirror and (
                                          not offer.get('name') or not valid_price(offer)
                                          or (require_photo and not (offer.get('api_image') or photo_path(offer))))))
                     if needs_public_data:
+                        ml_read_key = (source_key + ':' + selected['digest']) if selected else key
                         can_try_ml, ml_state = ml_resilience.can_try(key)
+                        if can_try_ml and ml_read_key != key:
+                            can_try_ml, ml_state = ml_resilience.can_try(ml_read_key)
                         if not can_try_ml:
                             reason = ml_state['reason']
                             marker = ('ml_resiliencia', key, reason, ml_state.get('source_reason'))
@@ -352,9 +359,8 @@ def run_publisher(args, parser):
                                     '| nova tentativa em', ml_state.get('retry_after'), 's'
                                 )
                                 announced.add(marker)
-                            metrics.record_offer(offer, 'AGUARDANDO', reason)
+                            metrics.record_offer(offer, 'AGUARDANDO', reason, selected=selected)
                             continue
-                        ml_read_key = key
                         try:
                             ready = auto_reader.read(offer, blocking=args.simular)
                             if ready is None:
@@ -362,9 +368,9 @@ def run_publisher(args, parser):
                                 if marker not in announced:
                                     print('Buscando título, preço e imagem do link Mercado Livre:', key)
                                     announced.add(marker)
-                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
+                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML', selected=selected)
                                 continue
-                            ml_resilience.success(ml_read_key)
+                            ml_resilience.success(ml_read_key, selected=selected)
                             offer = ready
                             offer.setdefault('auto_fetched_at', time.time())
                             key = offer.get('product_id')
@@ -373,8 +379,8 @@ def run_publisher(args, parser):
                             if not isinstance(key, str):
                                 continue
                             if is_ml_pending:
-                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML')
-                                state = backoff.failure(
+                                metrics.record_offer(offer, 'AGUARDANDO', 'LEITURA_ML', selected=selected)
+                                state = row_backoff.failure(
                                     source_key, revision_id, 'LEITURA_ML', base=300
                                 )
                                 print('Leitura automática ML ainda não normalizou o produto:', key,
@@ -385,8 +391,8 @@ def run_publisher(args, parser):
                                 checked = product(offer.get('url', ''))
                                 if (not checked or checked[0] != key or checked[1] != 'Mercado Livre'
                                         or checked[2] != offer['url']):
-                                    metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE')
-                                    state = backoff.failure(
+                                    metrics.record_offer(offer, 'REJEITADA', 'PRODUTO_INCONSISTENTE', selected=selected)
+                                    state = row_backoff.failure(
                                         source_key, revision_id, 'PRODUTO_INCONSISTENTE', base=300
                                     )
                                     print('Leitura ML retornou produto inconsistente; nova validação adiada:', key,
@@ -394,8 +400,8 @@ def run_publisher(args, parser):
                                           '| próxima em', state['delay'], 's')
                                     continue
                         except AffiliateError as error:
-                            state = ml_resilience.failure(ml_read_key, error)
-                            metrics.record_offer(offer, 'AGUARDANDO', state['reason'])
+                            state = ml_resilience.failure(ml_read_key, error, selected=selected)
+                            metrics.record_offer(offer, 'AGUARDANDO', state['reason'], selected=selected)
                             suffix = (
                                 ' | QUARENTENA' if state['quarantined'] else ''
                             ) + (
@@ -412,27 +418,28 @@ def run_publisher(args, parser):
                     if marker not in announced:
                         print('Aguardando preço explícito ou edição na origem:', key)
                         announced.add(marker)
-                    metrics.record_offer(offer, 'AGUARDANDO', 'PRECO_AUSENTE')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'PRECO_AUSENTE', selected=selected)
                     gate_blocked[source_key] = revision
                     continue
                 if args.simular and key in announced:
                     continue
                 if is_coupon:
                     raw_key = key
+                    coupon_cache_key = (source_key, selected['digest'] if selected else revision_id)
                     try:
-                        if raw_key not in prepared_coupons:
+                        if coupon_cache_key not in prepared_coupons:
                             if is_ml_coupon:
-                                prepared_coupons[raw_key] = ml_coupons.prepare_alert(offer)
+                                prepared_coupons[coupon_cache_key] = ml_coupons.prepare_alert(offer)
                             elif is_kabum_coupon:
-                                prepared_coupons[raw_key] = kabum_coupons.prepare_alert(kabum_affiliate, offer)
+                                prepared_coupons[coupon_cache_key] = kabum_coupons.prepare_alert(kabum_affiliate, offer)
                             else:
-                                prepared_coupons[raw_key] = prepare_alert(affiliate, offer)
-                        offer = prepared_coupons[raw_key]
+                                prepared_coupons[coupon_cache_key] = prepare_alert(affiliate, offer)
+                        offer = prepared_coupons[coupon_cache_key]
                         key = offer['product_id']
                     except AffiliateError as error:
                         reason = metric_reason_from_error(error)
-                        metrics.record_offer(offer, 'AGUARDANDO', reason)
-                        state = backoff.failure(raw_key, revision_id, reason, base=300)
+                        metrics.record_offer(offer, 'AGUARDANDO', reason, selected=selected)
+                        state = row_backoff.failure(raw_key, revision_id, reason, base=300)
                         print(str(error), '| tentativa:', state['failures'],
                               '| próxima em', state['delay'], 's')
                         continue
@@ -480,8 +487,7 @@ def run_publisher(args, parser):
                         else {'retry_after': 900, 'failures': 1, 'alert_sent': False}
                     )
                     metrics.record_offer(
-                        offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO'
-                    )
+                        offer, 'AGUARDANDO', 'ML_AFILIADO_SESSAO', selected=selected)
                     print(
                         'Sessão de afiliados Mercado Livre recusada | HTTP',
                         e.status, '| tentativa:', session_state['failures'],
@@ -493,12 +499,12 @@ def run_publisher(args, parser):
                 except AffiliateError as e:
                     if day:
                         ledger.release(key, day)
-                    metrics.record_offer(offer, 'REJEITADA', metric_reason_from_error(e))
+                    metrics.record_offer(offer, 'REJEITADA', metric_reason_from_error(e), selected=selected)
                     print(str(e))
                     if origin == 'radar':
-                        intelligence.discard(key)
+                        intelligence.discard(key, selected=selected)
                     reason = metric_reason_from_error(e)
-                    state = backoff.failure(source_key, revision_id, reason, base=300)
+                    state = row_backoff.failure(source_key, revision_id, reason, base=300)
                     print('Retentativa adiada:', source_key, '| tentativa:',
                           state['failures'], '| próxima em', state['delay'], 's')
                     continue
@@ -514,14 +520,14 @@ def run_publisher(args, parser):
                         outcome='blocked:' + error.reason,
                     )
                     state = 'REJEITADA' if error.discard else 'AGUARDANDO'
-                    metrics.record_offer(offer, state, error.reason)
+                    metrics.record_offer(offer, state, error.reason, selected=selected)
                     print(str(error), '| motivo:', error.reason)
                     if error.discard:
                         gate_blocked[source_key] = revision
                         if origin == 'radar':
-                            intelligence.discard(key)
+                            intelligence.discard(key, selected=selected)
                     elif error.retry_after:
-                        state = backoff.failure(
+                        state = row_backoff.failure(
                             source_key, revision_id, error.reason,
                             base=error.retry_after,
                         )
@@ -539,9 +545,12 @@ def run_publisher(args, parser):
                         offer['history_badge'] = intelligence.badge(offer, channel)
                     else:
                         offer['history_badge'] = str(offer.get('history_badge') or '')
-                day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel)
+                if not args.simular and selected is None:
+                    print('Oferta sem identidade persistente; envio cancelado:', key)
+                    continue
+                day = None if args.simular else ledger.reserve(key, offer=offer, channel=channel, selected=selected)
                 if not args.simular and not day:
-                    metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA')
+                    metrics.record_offer(offer, 'REJEITADA', 'DUPLICADA', selected=selected)
                     continue
                 if is_coupon:
                     image = (ml_coupons.banner_path(BASE) if is_ml_coupon
@@ -556,8 +565,8 @@ def run_publisher(args, parser):
                         announced.add(key)
                     if day:
                         ledger.release(key, day)
-                    metrics.record_offer(offer, 'AGUARDANDO', 'SEM_IMAGEM')
-                    state = backoff.failure(
+                    metrics.record_offer(offer, 'AGUARDANDO', 'SEM_IMAGEM', selected=selected)
+                    state = row_backoff.failure(
                         source_key, revision_id, 'SEM_IMAGEM', base=60
                     )
                     print('Imagem ainda indisponível:', source_key, '| tentativa:',
@@ -583,8 +592,17 @@ def run_publisher(args, parser):
                 sender = (ml_coupons.send_alert if is_ml_coupon
                           else (kabum_coupons.send_alert if is_kabum_coupon
                                 else (send_alert if is_coupon else send)))
-                if not ledger.mark_sending(key, day):
-                    metrics.record_offer(offer, 'AGUARDANDO', 'RESERVA_INVALIDA')
+                catalog_proof = offer.pop('_catalog_revision', None)
+                try:
+                    authorized = ledger.mark_sending(key, day, selected=selected,
+                        catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof)
+                except sqlite3.Error:
+                    ledger.cancel_reserved_selection(key, day, selected)
+                    row_backoff.failure(source_key, revision_id, 'AUTORIZACAO_INDISPONIVEL', base=60)
+                    print('Autorização SQLite indisponível; oferta preservada sem envio:', key)
+                    continue
+                if not authorized:
+                    metrics.record_offer(offer, 'AGUARDANDO', 'RESERVA_INVALIDA', selected=selected)
                     print('Reserva mudou antes do envio; publicação cancelada com segurança:', key)
                     continue
                 send_started = time.perf_counter()
@@ -602,41 +620,41 @@ def run_publisher(args, parser):
                         outcome='error:' + error.kind,
                     )
                     if error.kind == 'uncertain':
-                        backoff.clear(source_key)
+                        row_backoff.clear(source_key)
                         ledger.mark_uncertain(key, day, offer=offer, channel=channel)
-                        metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
+                        metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO', selected=selected)
                         print('Resposta Telegram incerta. Reserva marcada como uncertain:', key)
                         break
 
                     ledger.release(key, day)
                     if error.kind == 'permanent':
-                        backoff.clear(source_key)
-                        captured_queue.discard_product(source_key)
-                        metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX')
+                        row_backoff.clear(source_key)
+                        metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX', selected=selected)
+                        captured_queue.discard_selected(selected)
                         gate_blocked[source_key] = revision
                         if origin == 'radar':
-                            intelligence.discard(key)
+                            intelligence.discard(key, selected=selected)
                         print('Telegram rejeitou permanentemente a oferta:', key,
                               '| HTTP/API', error.error_code, '|', error.description)
                         continue
 
                     retry = max(error.retry_after, 1)
                     if error.kind == 'rate_limit':
-                        backoff.clear(source_key)
-                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_429')
+                        row_backoff.clear(source_key)
+                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_429', selected=selected)
                         ledger.mark_attempt(retry, clock_id=3)
                         print('Telegram aplicou rate limit; fila pausada por', retry, 's.')
                         break
                     if error.kind == 'configuration':
-                        backoff.clear(source_key)
-                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_CONFIG')
+                        row_backoff.clear(source_key)
+                        metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_CONFIG', selected=selected)
                         ledger.mark_attempt(retry, clock_id=3)
                         print('Telegram recusou a configuração do bot/canal; nova tentativa em',
                               retry, 's | código', error.error_code)
                         break
 
-                    metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_TRANSITORIO')
-                    state = backoff.failure(
+                    metrics.record_offer(offer, 'AGUARDANDO', 'TELEGRAM_TRANSITORIO', selected=selected)
+                    state = row_backoff.failure(
                         source_key, revision_id, 'TELEGRAM_TRANSITORIO',
                         base=retry,
                     )
@@ -650,9 +668,9 @@ def run_publisher(args, parser):
                         (time.perf_counter() - send_started) * 1000,
                         outcome='error:unexpected',
                     )
-                    backoff.clear(source_key)
+                    row_backoff.clear(source_key)
                     ledger.mark_uncertain(key, day, offer=offer, channel=channel)
-                    metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO')
+                    metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO', selected=selected)
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')
                     break
@@ -661,7 +679,7 @@ def run_publisher(args, parser):
                     (time.perf_counter() - send_started) * 1000,
                     outcome='ok',
                 )
-                ledger.finish(key, day, message_id, offer=offer, channel=channel)
+                ledger.finish(key, day, message_id, offer=offer, channel=channel, selected=selected)
                 try:
                     shadow_results = shadow.mirror_success(
                         offer, day=day, source_external_id=message_id, image=image,
@@ -677,11 +695,8 @@ def run_publisher(args, parser):
                         'Shadow multicanal falhou sem afetar Telegram:',
                         type(shadow_error).__name__,
                     )
-                captured_queue.discard_product(source_key)
-                backoff.clear(source_key)
-                if offer.get('source') == 'kabum_awin_coupon':
-                    intelligence.discard(key)
-                metrics.record_offer(offer, 'PUBLICADA', published_message_id=message_id)
+                row_backoff.clear(source_key)
+                metrics.record_offer(offer, 'PUBLICADA', published_message_id=message_id, selected=selected)
                 print('Publicado:', key, '| origem:', origin, '| mensagem', message_id)
                 break  # Lê novamente as filas e verifica a idade após a espera.
             if args.simular:
