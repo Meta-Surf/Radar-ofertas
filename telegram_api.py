@@ -45,14 +45,23 @@ def response_message_id(response):
             "uncertain", "Telegram retornou formato inesperado.", error_code=status
         )
     if data.get("ok") is True:
-        message_id = _integer((data.get("result") or {}).get("message_id"))
-        if message_id <= 0:
+        result = data.get("result")
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if type(message_id) is not int or message_id <= 0:
             raise TelegramSendError(
                 "uncertain",
                 "Telegram confirmou a chamada sem message_id válido.",
                 error_code=status,
             )
         return message_id
+
+    # Só uma rejeição explícita comprova que esta chamada não foi aceita.
+    # Ausência de ok, null, números e strings não autorizam retry/fallback.
+    if data.get("ok") is not False:
+        raise TelegramSendError(
+            "uncertain", "Telegram retornou resposta sem confirmação explícita.",
+            error_code=status,
+        )
 
     code = _integer(data.get("error_code"), status)
     description = data.get("description") or f"Telegram HTTP {status or code or 'desconhecido'}"
@@ -80,7 +89,8 @@ def response_message_id(response):
 
 
 def is_media_error(error):
-    if not isinstance(error, TelegramSendError) or error.error_code != 400:
+    if (not isinstance(error, TelegramSendError)
+            or error.kind != "permanent" or error.error_code != 400):
         return False
     text = error.description.casefold()
     return any(word in text for word in (
