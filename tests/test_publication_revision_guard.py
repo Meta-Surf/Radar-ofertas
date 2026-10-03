@@ -215,6 +215,35 @@ class RevisionTests(RevisionFixture):
         self.assertEqual(self.ledger.cancel_reserved_selection(self.offer['product_id'],day,self.selected),0)
         self.assertEqual(self.ledger.db.execute('SELECT status FROM posts').fetchone()[0],'reserved')
 
+    def test_stale_known_failure_cannot_release_another_reserved_or_sending_selection(self):
+        day=self.reserve(); self.edit(price='150,00')
+        new=self.q.pending(include_selection=True)[0]['_queue_selection']
+        # Uma conexão independente representa a reserva substituta de uma lease antiga.
+        with sqlite3.connect(self.path) as writer:
+            writer.execute('UPDATE publication_selections SET selection=?',(selection_id(new),))
+        for state in ('reserved','sending','uncertain','sent'):
+            with self.subTest(state=state):
+                with sqlite3.connect(self.path) as writer:
+                    writer.execute('UPDATE posts SET status=?',(state,))
+                before=self.ledger.db.execute('SELECT * FROM posts').fetchall()
+                self.assertEqual(self.ledger.release(self.offer['product_id'],day,selected=self.selected),0)
+                self.assertEqual(self.ledger.db.execute('SELECT * FROM posts').fetchall(),before)
+                self.assertEqual(self.q.pending()[0]['price'],'150,00')
+
+    def test_uncertain_transition_belongs_to_authorized_binding_not_new_queue_revision(self):
+        day=self.reserve(); self.assertTrue(self.authorize(day)); self.edit(price='150,00')
+        new=self.q.pending(include_selection=True)[0]['_queue_selection']
+        self.assertFalse(self.ledger.mark_uncertain(self.offer['product_id'],day,
+            offer=self.q.pending()[0],channel='@audit',selected=new))
+        self.assertEqual(self.ledger.db.execute('SELECT status FROM posts').fetchone()[0],'sending')
+        self.assertEqual(self.ledger.db.execute('SELECT count(*) FROM deliveries').fetchone()[0],0)
+        self.assertTrue(self.ledger.mark_uncertain(self.offer['product_id'],day,
+            offer=self.offer,channel='@audit',selected=self.selected))
+        state,payload=self.ledger.db.execute('SELECT state,payload FROM deliveries').fetchone()
+        self.assertEqual(state,'UNCERTAIN');self.assertEqual(json.loads(payload)['price'],self.offer['price'])
+        self.assertEqual(self.q.pending()[0]['price'],'150,00')
+        self.assertEqual(self.ledger.release(self.offer['product_id'],day,selected=self.selected),0)
+
     def test_stale_metrics_do_not_overwrite_edited_source(self):
         metrics=SourceMetrics(self.path); metrics.record_offer(self.offer, 'CAPTADA')
         new=self.edit(price='150,00',name='Nova mensagem')

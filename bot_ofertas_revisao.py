@@ -476,7 +476,7 @@ def run_publisher(args, parser):
                             raise AffiliateError('Título atualizado fora do tema; oferta ignorada.')
                 except MercadoLivreSessionError as e:
                     if day:
-                        ledger.release(key, day)
+                        ledger.release(key, day, selected=selected)
                     if ml_affiliate is not None:
                         ml_affiliate.cache.clear()
                     session_state = (
@@ -498,7 +498,7 @@ def run_publisher(args, parser):
                     continue
                 except AffiliateError as e:
                     if day:
-                        ledger.release(key, day)
+                        ledger.release(key, day, selected=selected)
                     metrics.record_offer(offer, 'REJEITADA', metric_reason_from_error(e), selected=selected)
                     print(str(e))
                     if origin == 'radar':
@@ -564,7 +564,7 @@ def run_publisher(args, parser):
                         print('Aguardando imagem autorizada:', key)
                         announced.add(key)
                     if day:
-                        ledger.release(key, day)
+                        ledger.release(key, day, selected=selected)
                     metrics.record_offer(offer, 'AGUARDANDO', 'SEM_IMAGEM', selected=selected)
                     state = row_backoff.failure(
                         source_key, revision_id, 'SEM_IMAGEM', base=60
@@ -621,12 +621,12 @@ def run_publisher(args, parser):
                     )
                     if error.kind == 'uncertain':
                         row_backoff.clear(source_key)
-                        ledger.mark_uncertain(key, day, offer=offer, channel=channel)
+                        ledger.mark_uncertain(key, day, offer=offer, channel=channel, selected=selected)
                         metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO', selected=selected)
                         print('Resposta Telegram incerta. Reserva marcada como uncertain:', key)
                         break
 
-                    ledger.release(key, day)
+                    ledger.release(key, day, selected=selected)
                     if error.kind == 'permanent':
                         row_backoff.clear(source_key)
                         metrics.record_offer(offer, 'REJEITADA', 'TELEGRAM_4XX', selected=selected)
@@ -669,7 +669,7 @@ def run_publisher(args, parser):
                         outcome='error:unexpected',
                     )
                     row_backoff.clear(source_key)
-                    ledger.mark_uncertain(key, day, offer=offer, channel=channel)
+                    ledger.mark_uncertain(key, day, offer=offer, channel=channel, selected=selected)
                     metrics.record_offer(offer, 'AGUARDANDO', 'ENVIO_INCERTO', selected=selected)
                     print('Envio com resultado incerto. Reserva marcada como uncertain:', key,
                           '(Confira o canal antes de liberar; detalhes sensíveis foram omitidos.)')

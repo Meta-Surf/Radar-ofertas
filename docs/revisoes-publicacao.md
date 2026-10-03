@@ -47,6 +47,12 @@ Caches de preparação de cupons e leitor ML distinguem revisões nativas.
 Métricas de uma tentativa antiga não sobrescrevem a mensagem editada na fila.
 O indicador de última publicação não é alterado por esta correção.
 
+Liberação por falha com não-envio conhecido e transição para UNCERTAIN também
+comparam a ligação persistente da reserva em sua transação. Comparam a revisão
+autorizada, e não a nova linha da fila: uma edição durante envio não impede
+preservar a incerteza da tentativa anterior. Callbacks de outra seleção não
+liberam nem modificam a reserva atual; SENT/UNCERTAIN não são liberados.
+
 Fotos Telegram novas são publicadas localmente por revisão nativa: nome inclui
 chat, mensagem e digest completo. Download e rebranding usam staging; o arquivo
 completo é ligado ao nome definitivo sem substituir outro. Edição durante envio

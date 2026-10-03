@@ -522,13 +522,17 @@ class Ledger:
                 "s.product=posts.product AND s.day=posts.day AND s.selection=?)",
                 (product_id,day,selection_id(selected))).rowcount
 
-    def mark_uncertain(self, product_id, day, *, offer=None, channel=""):
+    def mark_uncertain(self, product_id, day, *, offer=None, channel="", selected=None):
+        from revisao_publicacao import immediate, selection_id
         now = time.time()
-        with self.db:
+        binding = (" AND EXISTS(SELECT 1 FROM publication_selections s WHERE "
+                   "s.product=posts.product AND s.day=posts.day AND s.selection=?)") if selected is not None else ""
+        args = (now, product_id, day) + ((selection_id(selected),) if selected is not None else ())
+        with immediate(self.db):
             result = self.db.execute(
                 """UPDATE posts SET status='uncertain', updated_at=?
-                   WHERE product=? AND day=? AND status IN ('reserved','sending')""",
-                (now, product_id, day),
+                   WHERE product=? AND day=? AND status IN ('reserved','sending')""" + binding,
+                args,
             )
             if result.rowcount:
                 self.deliveries.record_uncertain(
@@ -571,11 +575,15 @@ class Ledger:
             if selected is not None:
                 discard_selected(self.db, selected)
 
-    def release(self, product_id, day):
+    def release(self, product_id, day, *, selected=None):
         """Libera apenas estados cujo não-envio é conhecido; nunca remove uncertain."""
-        with self.db:
-            self.db.execute(
+        from revisao_publicacao import immediate, selection_id
+        binding = (" AND EXISTS(SELECT 1 FROM publication_selections s WHERE "
+                   "s.product=posts.product AND s.day=posts.day AND s.selection=?)") if selected is not None else ""
+        args = (product_id, day) + ((selection_id(selected),) if selected is not None else ())
+        with immediate(self.db):
+            return self.db.execute(
                 """DELETE FROM posts
-                   WHERE product=? AND day=? AND status IN ('reserved','sending')""",
-                (product_id, day),
-            )
+                   WHERE product=? AND day=? AND status IN ('reserved','sending')""" + binding,
+                args,
+            ).rowcount
