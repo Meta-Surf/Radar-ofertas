@@ -138,6 +138,7 @@ class CaptureRevisionOrderTests(unittest.TestCase):
     def test_legacy_schema_migrates_additively_and_preserves_rows(self):
         legacy = Path(self.temp.name) / 'legacy.sqlite3'
         row = offer('p1')
+        row.pop('source_revision_at')
         with sqlite3.connect(legacy) as db:
             db.execute('''CREATE TABLE captured_queue (
                 queue_key TEXT PRIMARY KEY, product TEXT NOT NULL,chat_id TEXT,message_id INTEGER,
@@ -158,6 +159,28 @@ class CaptureRevisionOrderTests(unittest.TestCase):
             self.assertIsNone(queue.db.execute('SELECT source_revision_at FROM captured_queue').fetchone()[0])
         finally:
             queue.close()
+
+    def test_legacy_jsonl_import_does_not_invent_revision_from_source_date(self):
+        legacy = Path(self.temp.name) / 'legacy.jsonl'
+        row = offer('p1')
+        row.pop('source_revision_at')
+        legacy.write_text(json.dumps(row) + '\n')
+        self.queue.import_legacy_jsonl(legacy)
+        self.assertIsNone(self.queue.db.execute('SELECT source_revision_at FROM captured_queue').fetchone()[0])
+        self.assertEqual(self.queue.replace_capture([revision(1005, recovered=True)]), 0)
+        self.assertEqual(self.queue.pending(), [row])
+
+    def test_legacy_fallback_metadata_is_repaired_without_changing_content(self):
+        row = offer('p1')
+        row.pop('source_revision_at')
+        self.queue.replace_capture([row])
+        # Simula a versão intermediária que inferia revisão pela criação.
+        with self.queue.db:
+            self.queue.db.execute('UPDATE captured_queue SET source_revision_at=1000')
+        self.queue.close()
+        self.queue = CapturedOfferQueue(self.path, now=lambda: 1100)
+        self.assertIsNone(self.queue.db.execute('SELECT source_revision_at FROM captured_queue').fetchone()[0])
+        self.assertEqual(self.queue.pending(), [row])
 
     def test_threaded_recovery_live_stress_with_independent_sqlite_connections(self):
         # 8 writers, 2.400 callbacks, 12 origens: comparação deve ser atômica.

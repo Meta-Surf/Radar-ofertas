@@ -408,6 +408,7 @@ monitor também mantém a maior atividade nativa, mesmo após recovery antigo.
 A migração adiciona duas colunas sem remover dados ou índices. Linhas antigas
 usam o timestamp de revisão explícito do payload, quando existir. Se não houver,
 `source_revision_at` permanece NULL: `source_date` não comprova a última edição.
+O mesmo vale para importações JSONL sem metadados nativos de revisão.
 Essas linhas preservam o conteúdo até consumo/expiração normal; substituições
 são recusadas porque não é possível reconstruir `edit_date` não armazenado.
 A proteção vale enquanto a origem está persistida na fila; a deduplicação de

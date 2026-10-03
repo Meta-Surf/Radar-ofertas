@@ -30,6 +30,7 @@ def offer(product, *, chat=-123, message=7, price="10,00", digest="d1", recovere
         "capture_digest": digest,
         "recovered": recovered,
         "source_date": datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
+        "source_revision_at": datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
     }
 
 

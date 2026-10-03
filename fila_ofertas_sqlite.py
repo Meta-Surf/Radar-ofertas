@@ -24,7 +24,7 @@ def _source_timestamp(offer):
 def _revision(offer):
     # Tempo da origem, nunca o horário em que o callback terminou.
     stamp = (_timestamp(offer.get("source_revision_at"))
-             or _timestamp(offer.get("edit_date")) or _source_timestamp(offer))
+             or _timestamp(offer.get("edit_date")) or None)
     members = offer.get("source_revision_members") or []
     return stamp, members
 
@@ -34,7 +34,7 @@ def _can_replace(offer, previous):
     old_stamp, old_members, old_digest, old_recovered = previous
     # Uma linha legada pode ter sido editada sem persistir edit_date.
     # Não inferir a última revisão a partir da data de criação da mensagem.
-    if old_stamp is None:
+    if old_stamp is None or stamp is None:
         return False
     old_members = json.loads(old_members or "[]")
     current = {int(key): _timestamp(value) for key, value in members}
@@ -108,19 +108,26 @@ class CapturedOfferQueue:
             if "source_revision_at" not in columns:
                 self.db.execute("ALTER TABLE captured_queue ADD COLUMN source_revision_at REAL")
                 self.db.execute("ALTER TABLE captured_queue ADD COLUMN source_revision_members TEXT")
-                for key, payload in self.db.execute("SELECT queue_key,payload FROM captured_queue").fetchall():
-                    try:
-                        offer = json.loads(payload)
-                    except (TypeError, ValueError):
-                        offer = {}
-                    if not isinstance(offer, dict):
-                        offer = {}
-                    stamp, members = _revision(offer)
-                    if not (_timestamp(offer.get("source_revision_at")) or _timestamp(offer.get("edit_date"))):
-                        stamp = None
+            # Importações legadas também não têm autoridade de edição. Repara
+            # apenas metadados sem integrantes, nunca conteúdo/TTL da oferta.
+            rows = self.db.execute(
+                "SELECT queue_key,payload,source_revision_at,source_revision_members FROM captured_queue "
+                "WHERE source_revision_members IS NULL OR "
+                "(source_revision_at IS NOT NULL AND source_revision_members='[]')"
+            ).fetchall()
+            for key, payload, old_stamp, old_members in rows:
+                try:
+                    offer = json.loads(payload)
+                except (TypeError, ValueError):
+                    offer = {}
+                if not isinstance(offer, dict):
+                    offer = {}
+                stamp, members = _revision(offer)
+                raw_members = json.dumps(members, separators=(",", ":"))
+                if stamp != old_stamp or raw_members != old_members:
                     self.db.execute(
                         "UPDATE captured_queue SET source_revision_at=?,source_revision_members=? WHERE queue_key=?",
-                        (stamp, json.dumps(members), key),
+                        (stamp, raw_members, key),
                     )
 
 
