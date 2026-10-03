@@ -206,7 +206,8 @@ class MonitoredMercadoLivrePendingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(directory)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('sem Shopee')), \
                  patch.object(publisher.MercadoLivreAffiliate, 'from_env', return_value=fake_ml), \
                  patch.object(publisher, 'rows', return_value=iter([pending])), \

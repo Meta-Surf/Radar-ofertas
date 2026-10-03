@@ -233,7 +233,8 @@ class CouponTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
             ledger.mark_attempt(600, clock_id=2)
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(directory)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env'), \
                  patch.object(publisher, 'rows', side_effect=[iter([raw]), iter([raw])]), \
                  patch.object(publisher, 'prepare_alert', return_value=ready) as prepare, \

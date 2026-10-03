@@ -30,7 +30,8 @@ class IntegrationTests(unittest.TestCase):
             try:
                 from inteligencia_ofertas import Intelligence
                 Intelligence(ledger.db).enqueue([r1,r2], now=1000)
-                with patch.object(publisher, 'Ledger', return_value=ledger), \
+                with patch.object(publisher, 'BASE', Path(d)), \
+                     patch.object(publisher, 'Ledger', return_value=ledger), \
                      patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                      patch.object(publisher, 'rows', side_effect=[iter([r1, g1]), iter([r1]), iter([r2, g2]), iter([r2])]), \
                      patch.object(publisher, 'send', return_value=(123, 0)) as send, \
@@ -71,7 +72,8 @@ class IntegrationTests(unittest.TestCase):
             send_error = TelegramSendError(
                 'permanent', "Bad Request: can't parse entities", error_code=400
             )
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                  patch.object(publisher, 'rows', return_value=iter([first, second])), \
                  patch.object(publisher, 'send', side_effect=[send_error, (321, 0)]) as send, \
@@ -111,7 +113,8 @@ class IntegrationTests(unittest.TestCase):
             error = TelegramSendError(
                 'transient', 'Bad Gateway', error_code=502, retry_after=30
             )
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                  patch.object(publisher, 'rows', return_value=iter([first, second])), \
                  patch.object(publisher, 'send', side_effect=[error, (322, 0)]) as send, \
@@ -151,7 +154,8 @@ class IntegrationTests(unittest.TestCase):
             error = TelegramSendError(
                 'transient', 'Bad Gateway', error_code=502, retry_after=30
             )
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                  patch.object(publisher, 'rows', return_value=iter([dict(first), dict(second)])), \
                  patch.object(publisher, 'send', side_effect=[error, (701, 0)]) as send, \
@@ -215,7 +219,8 @@ class IntegrationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             ledger = Ledger(Path(d) / 'posts.db')
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=shopee), \
                  patch.object(publisher.MercadoLivreAffiliate, 'from_env', return_value=ml_client), \
                  patch.object(publisher, 'rows', return_value=iter([ml_offer, shopee_offer])), \
@@ -260,7 +265,8 @@ class IntegrationTests(unittest.TestCase):
             error = TelegramSendError(
                 'rate_limit', 'Too Many Requests', error_code=429, retry_after=90
             )
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                  patch.object(publisher, 'rows', return_value=iter([offer])), \
                  patch.object(publisher, 'send', side_effect=error) as send, \
@@ -354,7 +360,8 @@ class IntegrationTests(unittest.TestCase):
                 intelligence = Intelligence(ledger.db)
                 intelligence.enqueue([radar_offer])
                 ledger.mark_attempt(30, clock_id=4)
-                with patch.object(publisher, 'Ledger', return_value=ledger), \
+                with patch.object(publisher, 'BASE', Path(d)), \
+                     patch.object(publisher, 'Ledger', return_value=ledger), \
                      patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
                      patch.object(publisher, 'rows', return_value=iter([recovered])), \
                      patch.object(publisher, 'send', return_value=(123, 0)) as send, \

@@ -328,7 +328,8 @@ class AutoMLTests(unittest.TestCase):
         reader = Mock(); reader.read.return_value = ready
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(directory)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
                  patch.object(publisher, 'rows', side_effect=[iter([entry]), iter([entry])]), \
                  patch.object(auto, 'AutoReader', return_value=reader), \
@@ -365,7 +366,8 @@ class AutoMLTests(unittest.TestCase):
         reader = Mock(); reader.read.return_value = None
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(directory)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
                  patch.object(publisher, 'rows', return_value=iter([pending, ready])), \
                  patch.object(auto, 'AutoReader', return_value=reader), \

@@ -139,7 +139,9 @@ class IntelligenceTests(unittest.TestCase):
             dict(b, affiliate_url='https://s.shopee.com.br/gateok',
                  affiliate_generated=True, price_from=False),
         ]
-        with patch.object(publisher,'Ledger',return_value=self.ledger), \
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(publisher, 'BASE', Path(directory)), \
+             patch.object(publisher,'Ledger',return_value=self.ledger), \
              patch.object(publisher.ShopeeAffiliate,'from_env',return_value=client), \
              patch.object(publisher,'rows',return_value=iter([])), \
              patch.object(publisher,'send',return_value=(42,0)) as send, \

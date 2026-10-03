@@ -120,7 +120,8 @@ class MLCouponTests(unittest.TestCase):
         row = build()
         with tempfile.TemporaryDirectory() as directory:
             ledger = Ledger(Path(directory) / 'posts.db')
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(directory)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
                  patch.object(publisher, 'rows', side_effect=[iter([row]), iter([row])]), \
                  patch.object(ml, 'send_alert', return_value=(42, 0)) as send, \
