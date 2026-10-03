@@ -1,6 +1,9 @@
 """APIs opcionais da Awin para KaBuM: Offers e Enhanced Feed."""
 import json
+import hashlib
 import os
+import re
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -9,6 +12,50 @@ from ofertas_core import product
 
 API = "https://api.awin.com"
 ADVERTISER_ID = 17729
+
+
+def voucher_datetime(value):
+    """Timestamp nativo Awin: offset obrigatório, sem timezone implícito do host."""
+    if not isinstance(value, str):
+        raise ValueError('Prazo nativo ausente')
+    offset = re.search(r'(?:Z|[+-](\d{2}):?(\d{2}))$', value)
+    if not offset or (offset[1] is not None and (int(offset[1]) > 23 or int(offset[2]) > 59)):
+        raise ValueError('Offset nativo inválido')
+    stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if stamp.tzinfo is None or stamp.utcoffset() is None:
+        raise ValueError('Prazo nativo sem offset')
+    return stamp.astimezone(timezone.utc)
+
+
+def product_voucher_metadata(item, product_id):
+    """Unidade comercial por produto; função pura, sem consulta externa."""
+    if not isinstance(item, dict) or item.get('type') != 'voucher':
+        raise ValueError('Tipo de promoção inválido')
+    if item.get('product_id') not in (None, product_id):
+        raise ValueError('Identidade comercial contraditória')
+    target = product(str(item.get('destination_url') or ''))
+    if not target or target[0] != product_id or target[1] != 'KaBuM':
+        raise ValueError('Voucher de outro produto')
+    pid, code = str(item.get('promotion_id') or ''), str(item.get('coupon') or '')
+    if not pid.isdigit() or not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', code):
+        raise ValueError('Promoção/código inválido')
+    start, end = voucher_datetime(item.get('start_date')), voucher_datetime(item.get('end_date'))
+    if start >= end:
+        raise ValueError('Período comercial inválido')
+    metadata = dict(product_id=product_id, destination_url=target[2], promotion_id=pid,
+                type='voucher', coupon=code, start_date=start.isoformat(), end_date=end.isoformat(),
+                title=str(item.get('title') or ''), description=str(item.get('description') or ''),
+                terms=str(item.get('terms') or ''), tracking_url=str(item.get('tracking_url') or ''))
+    metadata['revision_digest'] = hashlib.sha256(json.dumps(metadata, sort_keys=True,
+        ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    return metadata
+
+
+def product_voucher_status(voucher, now):
+    start, end = voucher_datetime(voucher.get('start_date')), voucher_datetime(voucher.get('end_date'))
+    if start >= end or now.tzinfo is None:
+        raise ValueError('Período/relógio inválido')
+    return 'not_started' if now < start else ('expired' if now >= end else 'active')
 
 
 class AwinKabumAPI:
@@ -97,8 +144,12 @@ class AwinKabumAPI:
             if not target or target[1] != "KaBuM":
                 continue
             voucher = item.get("voucher") or {}
+            if not isinstance(voucher, dict):
+                voucher = {}  # O tipo voucher permanece; código ausente falha fechado.
             code = str(voucher.get("code") or "").strip()
             mapped.setdefault(target[0], []).append({
+                "product_id": target[0],
+                "destination_url": target[2],
                 "promotion_id": item.get("promotionId"),
                 "type": item.get("type"),
                 "title": str(item.get("title") or "").strip(),

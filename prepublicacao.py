@@ -415,6 +415,53 @@ class PrePublicationGate:
             prepared, "CUPOM_INVALIDO",
             "Gate: tipo de cupom não reconhecido.", discard=True,
         )
+
+    def _validate_kabum_product_voucher(self, offer):
+        from awin_kabum import AwinKabumAPI, product_voucher_metadata, product_voucher_status
+        def period(voucher):
+            status = product_voucher_status(voucher, datetime.now(timezone.utc))
+            if status == 'expired':
+                self.reject(offer, 'CUPOM_EXPIRADO', 'Gate: voucher do produto KaBuM expirou.',
+                            discard=True, retry_after=0)
+            if status == 'not_started':
+                self.reject(offer, 'CUPOM_NAO_INICIADO', 'Gate: voucher do produto KaBuM ainda não iniciou.')
+        try:
+            selected = product_voucher_metadata(offer.get('kabum_voucher'), offer['product_id'])
+            if selected['coupon'] != offer.get('coupon'):
+                raise ValueError('Código não corresponde à promoção selecionada')
+            period(selected)
+        except (TypeError, ValueError):
+            self.reject(offer, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: voucher do produto KaBuM sem proveniência comercial suficiente.')
+        api = AwinKabumAPI.from_env()
+        if not api.enabled:
+            self.reject(offer, 'VALIDACAO_INDISPONIVEL', 'Gate: Offers API indisponível para validar voucher do produto.')
+        try:
+            offers = self._cached_value('awin-kabum-offers', 60, api.offers)
+            if not isinstance(offers, list):
+                raise ValueError('Resposta Offers inválida')
+        except Exception as exc:
+            self.reject(offer, 'VALIDACAO_INDISPONIVEL', 'Gate: Offers API não confirmou voucher do produto.',
+                        details=type(exc).__name__)
+        matching = [item for item in offers if isinstance(item, dict)
+                    and str(item.get('promotionId') or '') == selected['promotion_id']]
+        try:
+            if len(matching) != 1 or not AwinKabumAPI._official_kabum_offer(matching[0]):
+                raise ValueError('Promoção ausente ou ambígua')
+            mapped = AwinKabumAPI.product_offer_map(api, matching)
+            candidates = mapped.get(offer['product_id'], [])
+            if len(candidates) != 1:
+                raise ValueError('Promoção de outro produto')
+            fresh = product_voucher_metadata(candidates[0], offer['product_id'])
+            # Período é sempre recalculado, mesmo se a lista veio do cache.
+            period(fresh)
+            if fresh != selected:
+                raise ValueError('Promoção comercial mudou; aguardar nova revisão')
+        except (AttributeError, TypeError, ValueError):
+            self.reject(offer, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: promoção/produto/código não correspondem à revisão selecionada.')
+        return selected
+
     def validate(self, original, prepared, channel=""):
         """Retorna a versão final a publicar ou levanta GateReject."""
         original = dict(original)
@@ -449,6 +496,9 @@ class PrePublicationGate:
                 current = self._copy_price_fields(current, fresh)
                 strong = True
         elif store == "KaBuM":
+            if (current.get('source') == 'kabum_feed' and current.get('kind') == 'product_offer'
+                    and (current.get('coupon') or current.get('kabum_voucher'))):
+                current['_voucher_proof'] = self._validate_kabum_product_voucher(current)
             fresh = self._fresh_kabum(current)
             current['_catalog_revision'] = self.kabum_revision
             if fresh is not None:

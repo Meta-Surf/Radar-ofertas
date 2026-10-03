@@ -671,11 +671,19 @@ def production_candidates(db, minimum_pct=5, limit=20, max_age_hours=24,
         priority_category = _category_priority(name, category)
         product_offers = official_offers.get(f"KaBuM:{pid}", [])
         official = product_offers[0] if product_offers else {}
-        coupon_code = next(
-            (str(item.get("coupon") or "").strip()
-             for item in product_offers if str(item.get("coupon") or "").strip()),
-            "",
-        )
+        vouchers = {json.dumps(item, sort_keys=True): item for item in product_offers
+                    if item.get('type') == 'voucher'}
+        voucher = None
+        if vouchers:
+            if len(vouchers) != 1:
+                continue  # Nenhuma escolha arbitrária entre vouchers diferentes.
+            from awin_kabum import product_voucher_metadata
+            official = next(iter(vouchers.values()))
+            try:
+                voucher = product_voucher_metadata(official, f'KaBuM:{pid}')
+            except (TypeError, ValueError):
+                continue  # Não transformar voucher desconhecido em produto sem cupom.
+        coupon_code = voucher['coupon'] if voucher else ''
         score = (
             min(pct, 40) * 1.5
             + (history_days / 15) * 2
@@ -720,6 +728,8 @@ def production_candidates(db, minimum_pct=5, limit=20, max_age_hours=24,
             "variant_id": pid,
             "variant_verified": True,
         }
+        if voucher is not None:
+            offer['kabum_voucher'] = voucher
         out.append(offer)
 
     out.sort(key=lambda item: (-item["radar_score"], item["product_id"]))

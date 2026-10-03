@@ -3,6 +3,7 @@ import io
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -44,7 +45,11 @@ class Kabum20Tests(unittest.TestCase):
             official = {
                 "KaBuM:123": [{
                     "type": "voucher", "title": "Oferta oficial",
-                    "coupon": "KABUM10"
+                    "coupon": "KABUM10", "promotion_id": "777",
+                    "product_id": "KaBuM:123",
+                    "destination_url": "https://www.kabum.com.br/produto/123",
+                    "start_date": datetime.fromtimestamp(now - DAY, timezone.utc).isoformat(),
+                    "end_date": datetime.fromtimestamp(now + DAY, timezone.utc).isoformat(),
                 }]
             }
             candidates = kabum.production_candidates(
