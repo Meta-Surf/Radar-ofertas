@@ -334,6 +334,20 @@ O publicador grava `reserved` antes do envio, muda para `sending` imediatamente 
 
 A reconciliação é sempre explícita: `uncertain` nunca é apagado automaticamente.
 
+Os comandos exigem exatamente uma reserva por produto/data. Sem `--dia`,
+mais de um registro do produto causa erro, sem alteração. Seleção e mudanças
+em `posts`, `deliveries` e histórico conhecido usam uma transação
+`BEGIN IMMEDIATE`; qualquer falha provoca rollback integral. A conta Telegram
+e a superfície `channel` devem corresponder à configuração; outros destinos
+permanecem intactos. Não há alteração de schema nem remoção de filas.
+
+`--nao-enviado` declara evidência de não-envio e nunca libera um SENT confirmado.
+Repetir a liberação já concluída retorna erro sem efeitos colaterais.
+`--enviado` exige ID inteiro positivo: repetir o mesmo ID já confirmado é no-op;
+ID conflitante causa erro. Payload enriquecido é preservado. O preço só entra
+no histórico se estava disponível no payload de envio; registros legados sem
+esses dados não recebem preço ou variante inventados.
+
 ## Dados locais que devem ser preservados
 
 Nunca substitua ou apague sem backup:
