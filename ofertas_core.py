@@ -482,7 +482,7 @@ class Ledger:
             raise
         return day if result.rowcount else None
 
-    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None):
+    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None, shopee_period_proof=None):
         if selected is not None:
             from revisao_publicacao import catalog_guard, immediate, matches, selection_id, current_row
             self.authorization_reason = 'RESERVA_INVALIDA'
@@ -500,6 +500,24 @@ class Ledger:
                                         (product_id, day))
                         return False
                     payload = json.loads(current_row(self.db, selected)[0])
+                    if (payload.get('source') == 'shopee_api'
+                            and payload.get('kind') != 'coupon_alert' and payload.get('publish_mode') != 'mirror'):
+                        from radar_shopee import product_offer_period, product_period_status
+                        try:
+                            if payload.get('store') != 'Shopee':
+                                raise ValueError('Loja não corresponde à seleção Shopee')
+                            period = product_offer_period(payload.get('shopee_offer_period'), product_id)
+                            if period != shopee_period_proof:
+                                raise ValueError('Prova não corresponde à revisão persistida')
+                            status = product_period_status(period, time.time())
+                            self.authorization_reason = {'expired':'OFERTA_EXPIRADA',
+                                'not_started':'OFERTA_NAO_INICIADA', 'active':''}[status]
+                        except (TypeError, ValueError):
+                            self.authorization_reason = 'OFERTA_VALIDADE_NAO_CONFIRMADA'
+                        if self.authorization_reason:
+                            self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                            (product_id, day))
+                            return False
                     if (payload.get('source') == 'kabum_feed' and payload.get('kind') == 'product_offer'
                             and payload.get('store') == 'KaBuM' and (payload.get('coupon') or payload.get('kabum_voucher'))):
                         from awin_kabum import product_voucher_metadata, product_voucher_status

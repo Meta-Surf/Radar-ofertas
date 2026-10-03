@@ -33,6 +33,7 @@ def shopee_offer(price="100,00", source="shopee_api", age=0):
         "affiliate_url": SHOPEE_LINK,
         "variant_id": "2",
         "variant_verified": True,
+        "shopee_offer_period": {"shop_id": "1", "item_id": "2", "start": 1, "end": 4102444800},
     }
 
 

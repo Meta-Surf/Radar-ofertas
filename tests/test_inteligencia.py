@@ -15,6 +15,7 @@ def offer(item=1, **kwargs):
              source='shopee_api', source_date=datetime.now(timezone.utc).isoformat(),
              price='100,00', rating=4.8, sales=100, discount=30,
              variant_id='modelo-preto', variant_verified=True, api_image='https://x.susercontent.com/a.jpg')
+    o['shopee_offer_period'] = dict(shop_id='1', item_id=str(item), start=1, end=4102444800)
     o.update(kwargs)
     return o
 
@@ -121,7 +122,7 @@ class IntelligenceTests(unittest.TestCase):
             self.assertIsNone(self.ledger.reserve('Shopee:1:1',offer=offer(price='90,00'),channel='@canal'))
 
     def test_direct_send_timeout_never_records_price(self):
-        client=Mock();client.prepare.return_value=offer()
+        client=Mock();client.prepare.return_value=offer(affiliate_generated=True,affiliate_url='https://s.shopee.com.br/audit',price_from=False)
         result=publish_one(client,self.ledger,offer(),'fake','@canal',Mock(side_effect=TimeoutError))
         self.assertEqual(result[0],'incerta')
         self.assertEqual(self.ledger.db.execute('SELECT count(*) FROM price_history').fetchone()[0],0)
@@ -153,7 +154,7 @@ class IntelligenceTests(unittest.TestCase):
         self.assertEqual(send.call_args.args[2]['product_id'],b['product_id'])
         self.assertGreater(self.ledger.publication_delay(clock_id=2),590)
         self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM price_history').fetchone()[0],1)
-        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM radar_queue').fetchone()[0],0)
+        self.assertEqual(self.ledger.db.execute('SELECT product FROM radar_queue').fetchall(),[(a['product_id'],)])
 
     def test_price_and_badge_layout(self):
         text=caption(offer(history_badge='📉 Novo menor preço divulgado neste canal nos últimos 30 dias.'))

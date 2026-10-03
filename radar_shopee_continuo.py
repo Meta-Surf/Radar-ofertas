@@ -217,34 +217,61 @@ def collect_theme(client, spec, collect):
 
 
 def publish_one(client, ledger, offer, token, channel, send):
+    import sqlite3
+    from inteligencia_ofertas import Intelligence, TTL
+    from prepublicacao import PrePublicationGate, GateReject
+    from revisao_publicacao import selection, immediate
+    intelligence = Intelligence(ledger.db)
     key = offer['product_id']
     day = None
+    selected = None
     try:
+        if offer.get('source') == 'shopee_api':
+            raw = json.dumps(offer, ensure_ascii=False)
+            with immediate(ledger.db):
+                ledger.db.execute('INSERT OR IGNORE INTO radar_queue VALUES (?,?,?,?)',
+                                  (key, raw, time.time(), time.time() + TTL))
+                current = ledger.db.execute('SELECT payload FROM radar_queue WHERE product=?', (key,)).fetchone()[0]
+                if current != raw:
+                    return 'revalidacao_falhou', None  # Nunca sobrescrever outra revisão existente.
+                selected = selection('radar_queue', key, current)
         prepared = client.prepare(offer)
         if offer.get('tema_radar') and not pertence_ao_tema(offer['tema_radar'], prepared):
             raise ValueError('Título revalidado não corresponde ao tema')
         if not prepared.get('api_image'):
             raise ValueError('Oferta sem imagem')
+        if selected is not None:
+            prepared = PrePublicationGate(Path(__file__).resolve().parent, ledger.db, shopee=client).validate(
+                offer, prepared, channel)
+    except GateReject as error:
+        return ('duplicada' if error.reason == 'DUPLICADA' else 'revalidacao_falhou'), None
     except Exception:
         return 'revalidacao_falhou', None
-    from inteligencia_ofertas import Intelligence
-    intelligence = Intelligence(ledger.db)
     for key_name in ('tema_radar', 'radar_group', 'radar_premium'):
         if key_name in offer:
             prepared[key_name] = offer[key_name]
     prepared['history_badge'] = intelligence.badge(prepared, channel)
-    day = ledger.reserve(key, offer=prepared, channel=channel)
+    day = ledger.reserve(key, offer=prepared, channel=channel, selected=selected)
     if day is None:
         return 'duplicada', None
+    proof = prepared.pop('_shopee_period_proof', None)
+    try:
+        if selected is not None and not ledger.mark_sending(key, day, selected=selected, shopee_period_proof=proof):
+            return 'rejeitada', None
+    except sqlite3.Error:
+        ledger.cancel_reserved_selection(key, day, selected)
+        return 'revalidacao_falhou', None
     try:
         message_id, _ = send(token, channel, prepared, prepared['api_image'])
     except Exception:
+        if selected is not None:
+            ledger.mark_uncertain(key, day, offer=prepared, channel=channel, selected=selected)
         return 'incerta', None
     if message_id is None:
-        ledger.release(key, day)
+        ledger.release(key, day, selected=selected)
         return 'rejeitada', None
     try:
-        ledger.finish(key, day, message_id, offer=prepared, channel=channel)
+        ledger.finish(key, day, message_id, offer=prepared, channel=channel, selected=selected)
     except Exception:
         return 'enviada_registro_pendente', message_id
     return 'publicada', message_id

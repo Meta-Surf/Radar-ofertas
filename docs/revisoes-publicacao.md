@@ -95,3 +95,38 @@ alterar o contrato geral de enqueue/pruning. As duas barreiras comerciais
 impedem envio mesmo com a linha ainda presente. Produto sem cupom e alertas
 genéricos KaBuM mantêm seus caminhos e custos anteriores. Entradas legadas
 com código sem proveniência ficam bloqueadas até atualização/expiração.
+
+## Período nativo de produto Shopee
+
+Produtos `source=shopee_api/store=Shopee` conservam `shopee_offer_period`
+com shop_id/item_id e início/fim nativos em epoch seconds inteiros. A prova
+comercial não contém relógio de consulta. Seus campos participam do payload
+persistido e do digest da seleção; não há migração de timestamps artificiais.
+O período exige start > 0, end > start e start <= now < end.
+
+O refresh usa exatamente o node do shop/item, recusa matches comerciais
+conflitantes e conserva o período reconsultado durante link/details. Gate
+normaliza a prova original e a preparada: diferença de período exige nova
+revisão persistida (REVISAO_COMERCIAL_ALTERADA); não renova silenciosamente
+a revisão antiga. Recalcula o período após toda preparação, antes do preço:
+OFERTA_EXPIRADA, OFERTA_NAO_INICIADA ou OFERTA_VALIDADE_NAO_CONFIRMADA são
+distinguíveis. Campos ausentes/invalidos e falhas de API aguardam retry;
+expiração comprovada descarta somente a seleção correspondente.
+
+Mark_sending recebe uma prova local separada, compara com o payload persistido
+sob o lock da seleção/reserva e recalcula epoch depois da espera, imediatamente
+antes de reserved -> sending. Não consulta Shopee nessa transação. Só a reserva
+RESERVED vinculada à seleção é cancelável; outro day, reserva substituta,
+SENT/SENDING/UNCERTAIN e revisão nova continuam protegidos. Uma atualização
+posterior à autorização não muda a confirmação do conteúdo realmente enviado.
+
+Itens legados sem período aguardam a próxima coleta completa, mesmo quando
+prepare conseguiu uma prova nova. TTL operacional/pruning permanecem, pois
+a segurança depende das duas barreiras; não se amplia o contrato geral de fila.
+Cupons, capturas Shopee de grupo, ML, KaBuM e shadow mantêm seus caminhos.
+
+O modo direto `radar_shopee_continuo --publicar` também persiste/seleciona a
+oferta antes de preparar, executa o mesmo Gate e usa a mesma autorização.
+Assim não existe bypass do período pelo modo antigo de envio. Timeout depois
+da autorização conserva UNCERTAIN vinculado; confirmação usa a seleção exata.
+O serviço de produção permanece em `--enfileirar`, sem envio direto ativado.

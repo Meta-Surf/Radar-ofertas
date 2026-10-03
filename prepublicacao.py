@@ -462,6 +462,27 @@ class PrePublicationGate:
                         'Gate: promoção/produto/código não correspondem à revisão selecionada.')
         return selected
 
+    def _validate_shopee_product_period(self, original, prepared):
+        from radar_shopee import product_offer_period, product_period_status
+        if original.get('store') != 'Shopee' or original.get('source') != 'shopee_api':
+            self.reject(prepared, 'OFERTA_VALIDADE_NAO_CONFIRMADA', 'Gate: origem Shopee não corresponde à seleção.')
+        try:
+            selected = product_offer_period(original.get('shopee_offer_period'), original['product_id'])
+            refreshed = product_offer_period(prepared.get('shopee_offer_period'), prepared['product_id'])
+        except (TypeError, ValueError):
+            self.reject(prepared, 'OFERTA_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: produto Shopee sem período nativo associado à revisão selecionada.')
+        if selected != refreshed:
+            self.reject(prepared, 'REVISAO_COMERCIAL_ALTERADA',
+                        'Gate: período Shopee mudou; aguardar nova revisão persistida.')
+        status = product_period_status(refreshed, time.time())
+        if status == 'expired':
+            self.reject(prepared, 'OFERTA_EXPIRADA', 'Gate: período da oferta Shopee encerrou.',
+                        discard=True, retry_after=0)
+        if status == 'not_started':
+            self.reject(prepared, 'OFERTA_NAO_INICIADA', 'Gate: período da oferta Shopee ainda não iniciou.')
+        return refreshed
+
     def validate(self, original, prepared, channel=""):
         """Retorna a versão final a publicar ou levanta GateReject."""
         original = dict(original)
@@ -482,6 +503,7 @@ class PrePublicationGate:
         strong = False
 
         if store == "Shopee" and current.get("source") == "shopee_api":
+            current['_shopee_period_proof'] = self._validate_shopee_product_period(original, current)
             strong = True
             self._compare_price(original, current, strong=True)
         elif store == "Mercado Livre":

@@ -25,11 +25,44 @@ def money(value):
     return f'{value:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
 
 
+class ShopeePeriodError(AffiliateError):
+    def __init__(self, reason, *, discard=False):
+        super().__init__('Oferta Shopee sem período comercial confirmado: ' + reason)
+        self.reason, self.discard = reason, discard
+
+
+def epoch_seconds(value):
+    if type(value) is not int and not (isinstance(value, str) and value.isascii() and value.isdigit()):
+        raise ValueError('Epoch nativo deve ser inteiro')
+    value = int(value)
+    if value <= 0:
+        raise ValueError('Epoch nativo deve ser positivo')
+    return value
+
+
+def product_offer_period(period, product_id):
+    """Prova comercial pura e determinística; nenhum relógio ou API."""
+    if not isinstance(period, dict):
+        raise ValueError('Período nativo ausente')
+    shop, item = str(period.get('shop_id') or ''), str(period.get('item_id') or '')
+    if (not shop.isascii() or not item.isascii() or not shop.isdigit() or not item.isdigit()
+            or int(shop) <= 0 or int(item) <= 0 or product_id != f'Shopee:{shop}:{item}'):
+        raise ValueError('Período de outro produto')
+    start, end = epoch_seconds(period.get('start')), epoch_seconds(period.get('end'))
+    if end <= start:
+        raise ValueError('Período nativo invertido')
+    return dict(shop_id=shop, item_id=item, start=start, end=end)
+
+
+def product_period_status(period, now):
+    return 'not_started' if now < period['start'] else ('expired' if now >= period['end'] else 'active')
+
+
 def active(node, now):
     # Datas ausentes/zero não comprovam período ativo: omite por precaução.
     try:
-        start, end = int(node['periodStartTime']), int(node['periodEndTime'])
-        return 0 < start <= now < end
+        start, end = epoch_seconds(node['periodStartTime']), epoch_seconds(node['periodEndTime'])
+        return 0 < start <= now < end and end > start
     except (KeyError, ValueError, TypeError):
         return False
 
@@ -40,6 +73,8 @@ def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, m
         shop, item = str(node['shopId']), str(node['itemId'])
         if not shop.isdigit() or not item.isdigit() or int(shop) <= 0 or int(item) <= 0:
             return None
+        period = product_offer_period(dict(shop_id=shop, item_id=item,
+            start=node.get('periodStartTime'), end=node.get('periodEndTime')), f'Shopee:{shop}:{item}')
         low, high = number(node['priceMin']), number(node['priceMax'])
         discount, rating, sales = number(node['priceDiscountRate']), number(node['ratingStar']), number(node['sales'])
         if (not active(node, now) or not 0 < low <= high or low < number(minimum_price) or
@@ -55,6 +90,7 @@ def candidate(node, minimum_discount=20, minimum_rating=4.5, minimum_sales=50, m
                 'rating': float(rating), 'sales': int(sales),
                 'api_image': node['imageUrl'], 'image': None, 'coupon': None,
                 'source': 'shopee_api', 'captured_at': stamp, 'source_date': stamp,
+                'shopee_offer_period': period,
                 'filter_discount': minimum_discount, 'filter_rating': minimum_rating,
                 'filter_sales': minimum_sales, 'filter_price_min': minimum_price}
     except (KeyError, TypeError, ValueError, InvalidOperation):
@@ -94,18 +130,28 @@ def refresh(client, offer):
     if not shop.isdigit() or not item.isdigit():
         raise AffiliateError('Identificação do produto inválida.')
     result = connection(client, 'productOfferV2', f'shopId: {shop}, itemId: {item}, limit: 1', FIELDS)
-    for node in result['nodes']:
-        if not isinstance(node, dict):
-            continue
-        if str(node.get('shopId')) == shop and str(node.get('itemId')) == item:
-            updated = candidate(node, offer.get('filter_discount', 20),
-                                offer.get('filter_rating', 4.5), offer.get('filter_sales', 50),
-                                offer.get('filter_price_min', 0))
-            if updated:
-                for key, value in offer.items():
-                    if key == 'tema_radar' or key.startswith('radar_'):
-                        updated[key] = value
-                return updated
+    matching = {json.dumps(node, sort_keys=True):node for node in result['nodes']
+                if isinstance(node, dict) and str(node.get('shopId')) == shop and str(node.get('itemId')) == item}
+    if len(matching) != 1:
+        raise ShopeePeriodError('OFERTA_VALIDADE_NAO_CONFIRMADA')
+    node = next(iter(matching.values()))
+    try:
+        period = product_offer_period(dict(shop_id=shop, item_id=item,
+            start=node.get('periodStartTime'), end=node.get('periodEndTime')), offer['product_id'])
+    except (TypeError, ValueError):
+        raise ShopeePeriodError('OFERTA_VALIDADE_NAO_CONFIRMADA') from None
+    state = product_period_status(period, time.time())
+    if state != 'active':
+        raise ShopeePeriodError('OFERTA_EXPIRADA' if state == 'expired' else 'OFERTA_NAO_INICIADA',
+                                discard=state == 'expired')
+    updated = candidate(node, offer.get('filter_discount', 20),
+                        offer.get('filter_rating', 4.5), offer.get('filter_sales', 50),
+                        offer.get('filter_price_min', 0))
+    if updated:
+        for key, value in offer.items():
+            if key == 'tema_radar' or key.startswith('radar_'):
+                updated[key] = value
+        return updated
     raise AffiliateError('Oferta Shopee indisponível ou fora dos filtros na revalidação; envio bloqueado.')
 
 

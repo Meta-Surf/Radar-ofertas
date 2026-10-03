@@ -499,11 +499,13 @@ def run_publisher(args, parser):
                 except AffiliateError as e:
                     if day:
                         ledger.release(key, day, selected=selected)
-                    metrics.record_offer(offer, 'REJEITADA', metric_reason_from_error(e), selected=selected)
+                    retry_shopee = (offer.get('source') == 'shopee_api' and offer.get('store') == 'Shopee'
+                                    and offer.get('kind') != 'coupon_alert' and not getattr(e, 'discard', False))
+                    reason = getattr(e, 'reason', '') or metric_reason_from_error(e)
+                    metrics.record_offer(offer, 'AGUARDANDO' if retry_shopee else 'REJEITADA', reason, selected=selected)
                     print(str(e))
-                    if origin == 'radar':
+                    if origin == 'radar' and not retry_shopee:
                         intelligence.discard(key, selected=selected)
-                    reason = metric_reason_from_error(e)
                     state = row_backoff.failure(source_key, revision_id, reason, base=300)
                     print('Retentativa adiada:', source_key, '| tentativa:',
                           state['failures'], '| próxima em', state['delay'], 's')
@@ -594,10 +596,11 @@ def run_publisher(args, parser):
                                 else (send_alert if is_coupon else send)))
                 catalog_proof = offer.pop('_catalog_revision', None)
                 voucher_proof = offer.pop('_voucher_proof', None)
+                shopee_period_proof = offer.pop('_shopee_period_proof', None)
                 try:
                     authorized = ledger.mark_sending(key, day, selected=selected,
                         catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof,
-                        voucher_proof=voucher_proof)
+                        voucher_proof=voucher_proof, shopee_period_proof=shopee_period_proof)
                 except sqlite3.Error:
                     ledger.cancel_reserved_selection(key, day, selected)
                     row_backoff.failure(source_key, revision_id, 'AUTORIZACAO_INDISPONIVEL', base=60)
