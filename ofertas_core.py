@@ -482,9 +482,10 @@ class Ledger:
             raise
         return day if result.rowcount else None
 
-    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None):
+    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None):
         if selected is not None:
-            from revisao_publicacao import catalog_guard, immediate, matches, selection_id
+            from revisao_publicacao import catalog_guard, immediate, matches, selection_id, current_row
+            self.authorization_reason = 'RESERVA_INVALIDA'
             # O commit de reserved -> sending é a fronteira de autorização.
             # O catálogo permanece bloqueado até esse commit, sem escrever nele.
             with catalog_guard(catalog_path, catalog_proof) as source_matches:
@@ -498,6 +499,23 @@ class Ledger:
                         self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
                                         (product_id, day))
                         return False
+                    payload = json.loads(current_row(self.db, selected)[0])
+                    if (payload.get('source') == 'kabum_feed' and payload.get('kind') == 'product_offer'
+                            and payload.get('store') == 'KaBuM' and (payload.get('coupon') or payload.get('kabum_voucher'))):
+                        from awin_kabum import product_voucher_metadata, product_voucher_status
+                        try:
+                            voucher = product_voucher_metadata(payload.get('kabum_voucher'), product_id)
+                            if voucher != voucher_proof or voucher['coupon'] != payload.get('coupon'):
+                                raise ValueError('Evidência não corresponde à revisão')
+                            status = product_voucher_status(voucher, datetime.fromtimestamp(time.time(), ZoneInfo('UTC')))
+                            self.authorization_reason = {'expired':'CUPOM_EXPIRADO',
+                                'not_started':'CUPOM_NAO_INICIADO', 'active':''}[status]
+                        except (TypeError, ValueError):
+                            self.authorization_reason = 'CUPOM_VALIDADE_NAO_CONFIRMADA'
+                        if self.authorization_reason:
+                            self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                            (product_id, day))
+                            return False
                     return bool(self.db.execute(
                         "UPDATE posts SET status='sending',send_started_at=?,updated_at=? "
                         "WHERE product=? AND day=? AND status='reserved'",

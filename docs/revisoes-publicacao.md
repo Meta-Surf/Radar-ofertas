@@ -63,3 +63,35 @@ autorização permanece conservador: startup converte sending em uncertain e
 impede reenvio, mesmo que a fila já tenha uma revisão nova. Os testes injetam
 crashes antes/depois de autorização, aceitação remota simulada e dentro/depois
 da confirmação; não fazem envios externos.
+
+## Voucher anexado a produto KaBuM
+
+Produtos `kabum_feed/product_offer` com cupom persistem uma unidade
+`kabum_voucher`: produto/destino oficial, promotion_id, tipo, código, início,
+fim, termos e metadados da mesma promoção. Vouchers diferentes para o mesmo
+produto são recusados pelo coletor; duplicatas idênticas representam uma
+unidade. Não se combina o código de uma promoção com datas de outra.
+Datas nativas exigem offset e são normalizadas em UTC; o período é
+`start <= now < end`. SHA-256 desses campos não inclui relógio volátil.
+
+O Gate exige a mesma identidade comercial na Offers API. Reutiliza somente
+a lista no cache existente de 60 segundos e recalcula o prazo em toda
+avaliação. Promoção removida, metadados ausentes/contraditórios e alteração
+comercial aguardam nova revisão com CUPOM_VALIDADE_NAO_CONFIRMADA, sem
+descarte definitivo. Falha de API produz VALIDACAO_INDISPONIVEL; início futuro
+produz CUPOM_NAO_INICIADO; prazo encerrado produz CUPOM_EXPIRADO e descarte
+condicional da revisão exata. O cupom não é removido para liberar o produto.
+
+Na fronteira reserved -> sending, depois de obter ambos os locks, o ledger
+confere localmente o voucher persistido contra a prova do Gate e recalcula
+o prazo imediatamente antes do UPDATE. Não chama API sob lock. Expiração
+cancela somente a reserva RESERVED vinculada à seleção; nunca SENT, SENDING,
+UNCERTAIN ou uma reserva de outra seleção. Após autorização, uma edição nova
+é preservada e a confirmação continua descrevendo o conteúdo enviado.
+
+O TTL operacional de duas horas permanece: antecipar a expiração da fila
+eliminaria o registro antes da classificação explícita pelo Gate e exigiria
+alterar o contrato geral de enqueue/pruning. As duas barreiras comerciais
+impedem envio mesmo com a linha ainda presente. Produto sem cupom e alertas
+genéricos KaBuM mantêm seus caminhos e custos anteriores. Entradas legadas
+com código sem proveniência ficam bloqueadas até atualização/expiração.

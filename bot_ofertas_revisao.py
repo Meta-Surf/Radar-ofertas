@@ -593,17 +593,20 @@ def run_publisher(args, parser):
                           else (kabum_coupons.send_alert if is_kabum_coupon
                                 else (send_alert if is_coupon else send)))
                 catalog_proof = offer.pop('_catalog_revision', None)
+                voucher_proof = offer.pop('_voucher_proof', None)
                 try:
                     authorized = ledger.mark_sending(key, day, selected=selected,
-                        catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof)
+                        catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof,
+                        voucher_proof=voucher_proof)
                 except sqlite3.Error:
                     ledger.cancel_reserved_selection(key, day, selected)
                     row_backoff.failure(source_key, revision_id, 'AUTORIZACAO_INDISPONIVEL', base=60)
                     print('Autorização SQLite indisponível; oferta preservada sem envio:', key)
                     continue
                 if not authorized:
-                    metrics.record_offer(offer, 'AGUARDANDO', 'RESERVA_INVALIDA', selected=selected)
-                    print('Reserva mudou antes do envio; publicação cancelada com segurança:', key)
+                    reason = getattr(ledger, 'authorization_reason', '') or 'RESERVA_INVALIDA'
+                    metrics.record_offer(offer, 'AGUARDANDO', reason, selected=selected)
+                    print('Autorização cancelada com segurança:', key, '| motivo:', reason)
                     continue
                 send_started = time.perf_counter()
                 try:
