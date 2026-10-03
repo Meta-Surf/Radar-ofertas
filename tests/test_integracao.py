@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -26,14 +27,14 @@ class IntegrationTests(unittest.TestCase):
             affiliate_generated=True, price_from=False,
         )
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             try:
                 from inteligencia_ofertas import Intelligence
                 Intelligence(ledger.db).enqueue([r1,r2], now=1000)
                 with patch.object(publisher, 'BASE', Path(d)), \
                      patch.object(publisher, 'Ledger', return_value=ledger), \
                      patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                     patch.object(publisher, 'rows', side_effect=[iter([r1, g1]), iter([r1]), iter([r2, g2]), iter([r2])]), \
+                     patch.object(publisher, 'rows', side_effect=[persisted_rows([r1, g1], d), persisted_rows([r1], d), persisted_rows([r2, g2], d), persisted_rows([r2], d)]), \
                      patch.object(publisher, 'send', return_value=(123, 0)) as send, \
                      patch.object(publisher.time, 'sleep', side_effect=[None, None, None, KeyboardInterrupt]), \
                      patch('ofertas_core.time.time', return_value=1000), \
@@ -68,14 +69,14 @@ class IntegrationTests(unittest.TestCase):
             affiliate_generated=True, price_from=False,
         )
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             send_error = TelegramSendError(
                 'permanent', "Bad Request: can't parse entities", error_code=400
             )
             with patch.object(publisher, 'BASE', Path(d)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                 patch.object(publisher, 'rows', return_value=iter([first, second])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([first, second], d)), \
                  patch.object(publisher, 'send', side_effect=[send_error, (321, 0)]) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
                  patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
@@ -109,14 +110,14 @@ class IntegrationTests(unittest.TestCase):
             affiliate_generated=True, price_from=False,
         )
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             error = TelegramSendError(
                 'transient', 'Bad Gateway', error_code=502, retry_after=30
             )
             with patch.object(publisher, 'BASE', Path(d)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                 patch.object(publisher, 'rows', return_value=iter([first, second])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([first, second], d)), \
                  patch.object(publisher, 'send', side_effect=[error, (322, 0)]) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
                  patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
@@ -150,14 +151,14 @@ class IntegrationTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             error = TelegramSendError(
                 'transient', 'Bad Gateway', error_code=502, retry_after=30
             )
             with patch.object(publisher, 'BASE', Path(d)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                 patch.object(publisher, 'rows', return_value=iter([dict(first), dict(second)])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([dict(first), dict(second)], d)), \
                  patch.object(publisher, 'send', side_effect=[error, (701, 0)]) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
                  patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
@@ -168,15 +169,16 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(send.call_count, 2)
             retry = ledger.db.execute(
                 "SELECT failures,next_at FROM publisher_retry WHERE retry_key=?",
-                (first['product_id'],),
+                ('captured_queue:product:' + first['product_id'],),
             ).fetchone()
             self.assertIsNotNone(retry)
             self.assertEqual(retry[0], 1)
             self.assertGreater(retry[1], 0)
 
-            with patch.object(publisher, 'Ledger', return_value=ledger), \
+            with patch.object(publisher, 'BASE', Path(d)), \
+                 patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                 patch.object(publisher, 'rows', return_value=iter([dict(first)])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([dict(first)], d)), \
                  patch.object(publisher, 'send') as send_again, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
                  patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
@@ -218,12 +220,12 @@ class IntegrationTests(unittest.TestCase):
         reader.close = Mock()
 
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             with patch.object(publisher, 'BASE', Path(d)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=shopee), \
                  patch.object(publisher.MercadoLivreAffiliate, 'from_env', return_value=ml_client), \
-                 patch.object(publisher, 'rows', return_value=iter([ml_offer, shopee_offer])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([ml_offer, shopee_offer], d)), \
                  patch('mercadolivre_auto.AutoReader', return_value=reader), \
                  patch.object(publisher, 'send', return_value=(811, 0)) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
@@ -261,14 +263,14 @@ class IntegrationTests(unittest.TestCase):
             affiliate_generated=True, price_from=False,
         )
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             error = TelegramSendError(
                 'rate_limit', 'Too Many Requests', error_code=429, retry_after=90
             )
             with patch.object(publisher, 'BASE', Path(d)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                 patch.object(publisher, 'rows', return_value=iter([offer])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([offer], d)), \
                  patch.object(publisher, 'send', side_effect=error) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \
                  patch.dict('os.environ', {'TELEGRAM_TOKEN':'fake', 'TELEGRAM_CANAL':'@fake'}), \
@@ -354,7 +356,7 @@ class IntegrationTests(unittest.TestCase):
             affiliate_generated=True, price_from=False,
         )
         with tempfile.TemporaryDirectory() as d:
-            ledger = Ledger(Path(d) / 'posts.db')
+            ledger = Ledger(Path(d) / 'publicacoes.sqlite3')
             try:
                 from inteligencia_ofertas import Intelligence
                 intelligence = Intelligence(ledger.db)
@@ -363,7 +365,7 @@ class IntegrationTests(unittest.TestCase):
                 with patch.object(publisher, 'BASE', Path(d)), \
                      patch.object(publisher, 'Ledger', return_value=ledger), \
                      patch.object(publisher.ShopeeAffiliate, 'from_env', return_value=client), \
-                     patch.object(publisher, 'rows', return_value=iter([recovered])), \
+                     patch.object(publisher, 'rows', return_value=persisted_rows([recovered], d)), \
                      patch.object(publisher, 'send', return_value=(123, 0)) as send, \
                      patch.object(publisher.time, 'sleep', side_effect=[KeyboardInterrupt]), \
                      patch.dict('os.environ', {
@@ -381,7 +383,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_cooldown_survives_restart(self):
         with tempfile.TemporaryDirectory() as d:
-            db = Path(d) / 'posts.db'
+            db = Path(d) / 'publicacoes.sqlite3'
             ledger = Ledger(db)
             with patch('ofertas_core.time.time', return_value=1000):
                 ledger.mark_attempt(300)
@@ -393,7 +395,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_two_sources_share_product_reservation(self):
         with tempfile.TemporaryDirectory() as d:
-            a, b = Ledger(Path(d) / 'posts.db'), Ledger(Path(d) / 'posts.db')
+            a, b = Ledger(Path(d) / 'publicacoes.sqlite3'), Ledger(Path(d) / 'publicacoes.sqlite3')
             day = a.reserve('Shopee:123:456')
             a.finish('Shopee:123:456', day, 123)
             self.assertIsNone(b.reserve('Shopee:123:456'))

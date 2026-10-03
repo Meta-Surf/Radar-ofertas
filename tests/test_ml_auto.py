@@ -1,3 +1,4 @@
+from tests.publisher_fixtures import persisted_rows
 import io
 import json
 import os
@@ -327,11 +328,11 @@ class AutoMLTests(unittest.TestCase):
         entry = row(); ready = dict(entry, **auto.extract_product(document(), DIRECT))
         reader = Mock(); reader.read.return_value = ready
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
-                 patch.object(publisher, 'rows', side_effect=[iter([entry]), iter([entry])]), \
+                 patch.object(publisher, 'rows', side_effect=[persisted_rows([entry], directory), persisted_rows([entry], directory)]), \
                  patch.object(auto, 'AutoReader', return_value=reader), \
                  patch.object(publisher, 'send', return_value=(42, 0)) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=[None, KeyboardInterrupt]), \
@@ -365,11 +366,11 @@ class AutoMLTests(unittest.TestCase):
         ready['source_date'] = pending['source_date']
         reader = Mock(); reader.read.return_value = None
         with tempfile.TemporaryDirectory() as directory:
-            ledger = Ledger(Path(directory) / 'posts.db')
+            ledger = Ledger(Path(directory) / 'publicacoes.sqlite3')
             with patch.object(publisher, 'BASE', Path(directory)), \
                  patch.object(publisher, 'Ledger', return_value=ledger), \
                  patch.object(publisher.ShopeeAffiliate, 'from_env', side_effect=AffiliateError('ausente')), \
-                 patch.object(publisher, 'rows', return_value=iter([pending, ready])), \
+                 patch.object(publisher, 'rows', return_value=persisted_rows([pending, ready], directory)), \
                  patch.object(auto, 'AutoReader', return_value=reader), \
                  patch.object(publisher, 'send', return_value=(42, 0)) as send, \
                  patch.object(publisher.time, 'sleep', side_effect=KeyboardInterrupt), \

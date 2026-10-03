@@ -125,4 +125,4 @@ class RadarPublicationSelectionTests(unittest.TestCase):
             self.assertEqual(sender.call_args.args[2]['product_id'],'KaBuM:21')
             self.assertEqual(self.ledger.db.execute("SELECT status,message_id FROM posts WHERE product='KaBuM:21'").fetchall(),[('sent',77)])
             get.assert_not_called();post.assert_not_called()
-            self.assertEqual(self.ledger.db.execute("SELECT reason FROM publisher_retry WHERE retry_key=?",(stale['product_id'],)).fetchone()[0],'VALIDACAO_INDISPONIVEL')
+            self.assertEqual(self.ledger.db.execute("SELECT reason FROM publisher_retry WHERE retry_key=?",('captured_queue:tg:-1:1:' + stale['product_id'],)).fetchone()[0],'VALIDACAO_INDISPONIVEL')

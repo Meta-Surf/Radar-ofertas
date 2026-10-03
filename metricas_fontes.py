@@ -3,6 +3,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from revisao_publicacao import matches
 
 STATUSES = {'RECEBIDA', 'CAPTADA', 'AGUARDANDO', 'REJEITADA', 'PUBLICADA'}
 
@@ -100,6 +101,17 @@ class SourceMetrics:
         }
         try:
             with self._connect() as db:
+                selected = fields.get('_queue_selection')
+                if selected is not None:
+                    db.execute('BEGIN IMMEDIATE')
+                    if not matches(db, selected, require_active=False):
+                        # PUBLICADA é histórico da confirmação já consumida. Não
+                        # atribuir a confirmação antiga à mensagem editada viva.
+                        newer = db.execute(
+                            'SELECT 1 FROM captured_queue WHERE chat_id=? AND message_id=? LIMIT 1',
+                            (str(chat_id), int(message_id))).fetchone()
+                        if status != 'PUBLICADA' or newer:
+                            return False
                 previous = db.execute(
                     'SELECT status, published FROM source_messages WHERE chat_id=? AND source_message_id=?',
                     (str(chat_id), int(message_id))
@@ -147,7 +159,7 @@ class SourceMetrics:
             logging.warning('Falha ao registrar métrica de fonte: %s', type(error).__name__)
             return False
 
-    def record_offer(self, offer, status, reason='', published_message_id=None):
+    def record_offer(self, offer, status, reason='', published_message_id=None, *, selected=None):
         if not isinstance(offer, dict):
             return False
         return self.record(
@@ -163,4 +175,5 @@ class SourceMetrics:
             captured=True,
             recovered=bool(offer.get('recovered')),
             published_message_id=published_message_id,
+            _queue_selection=selected,
         )

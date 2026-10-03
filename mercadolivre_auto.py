@@ -711,6 +711,9 @@ class AutoReader:
         keys = (
             'kind', 'source', 'chat_id', 'product_id', 'url', 'name', 'price',
             'price_condition', 'price_from', 'image', 'api_image',
+            'message_id', 'coupon', 'text', 'caption', 'mirror_template',
+            'publish_mode', 'capture_digest', 'source_revision_at',
+            'source_revision_members', 'edit_date', 'original_url',
         )
         payload = {key: offer.get(key) for key in keys if key in offer}
         raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)

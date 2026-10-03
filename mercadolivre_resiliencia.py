@@ -1,6 +1,7 @@
 """Resiliência persistente para leitura pública do Mercado Livre."""
 import re
 import time
+from revisao_publicacao import immediate, matches
 
 
 WINDOW_403 = 5 * 60
@@ -121,7 +122,7 @@ class MLResilience:
         ).fetchone()[0]
         if count < 5:
             return False
-        with self.db:
+        with immediate(self.db):
             self.db.execute(
                 """INSERT INTO ml_resolution_circuit(id,open_until,reason,opened)
                    VALUES(1,?,?,?)
@@ -132,7 +133,14 @@ class MLResilience:
             )
         return True
 
-    def failure(self, product, error, now=None):
+    def failure(self, product, error, now=None, *, selected=None):
+        with immediate(self.db):
+            if selected is not None and not matches(self.db, selected):
+                return {'reason': 'REVISAO_SUBSTITUIDA', 'failures': 0,
+                        'retry_after': 0, 'quarantined': False, 'circuit_opened': False}
+            return self._failure(product, error, now)
+
+    def _failure(self, product, error, now=None):
         now = time.time() if now is None else float(now)
         product = str(product)
         reason = classify(error)
@@ -146,7 +154,7 @@ class MLResilience:
         quarantine = quarantine_seconds(reason, failures)
         quarantine_until = now + quarantine if quarantine else 0
         details = re.sub(r"\s+", " ", str(error or "")).strip()[:240]
-        with self.db:
+        with immediate(self.db):
             self.db.execute(
                 """INSERT INTO ml_resolution_failures
                    (product,failures,first_failure,last_failure,next_retry,
@@ -174,8 +182,10 @@ class MLResilience:
             "circuit_opened": opened,
         }
 
-    def success(self, product):
-        with self.db:
+    def success(self, product, *, selected=None):
+        with immediate(self.db):
+            if selected is not None and not matches(self.db, selected):
+                return
             self.db.execute(
                 "DELETE FROM ml_resolution_failures WHERE product=?",
                 (str(product),),

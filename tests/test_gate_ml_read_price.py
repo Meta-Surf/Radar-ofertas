@@ -121,7 +121,7 @@ class MLReadPriceTests(unittest.TestCase):
                     self.gate.validate(self.original, self.prepared, '@audit')
                 self.assertEqual(caught.exception.reason, 'VALIDACAO_INDISPONIVEL')
 
-    def test_blocking_cache_reuses_only_read_price_and_expires_after_sixty_seconds(self):
+    def test_blocking_cache_is_scoped_to_native_revision_and_expires_after_sixty_seconds(self):
         clock = [1000.0]
         with patch('mercadolivre_auto.time.monotonic', side_effect=lambda: clock[0]), \
              patch('mercadolivre_auto.fetch_http', return_value=self.page('90,00')) as fetch:
@@ -130,10 +130,12 @@ class MLReadPriceTests(unittest.TestCase):
             self.prepared.update(price='95,00', source_revision_at='new')
             second = self.gate.validate(self.original, self.prepared, '@audit')
             self.assertEqual((first['price'], second['price']), ('90,00', '90,00'))
-            self.assertEqual(fetch.call_count, 1)
-            clock[0] += 61
+            self.assertEqual(fetch.call_count, 2)
             self.gate.validate(self.original, self.prepared, '@audit')
             self.assertEqual(fetch.call_count, 2)
+            clock[0] += 61
+            self.gate.validate(self.original, self.prepared, '@audit')
+            self.assertEqual(fetch.call_count, 3)
         self.assertEqual(self.reader.GATE_CACHE_SECONDS, 60)
         self.assertEqual(self.reader.CACHE_SECONDS, 300)
 

@@ -8,6 +8,7 @@ import unicodedata
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from functools import lru_cache
+from revisao_publicacao import selection, discard_selected
 
 DAY = 86400
 TTL = 2 * 3600
@@ -113,9 +114,10 @@ class Intelligence:
                   refreshed=excluded.refreshed, expires=excluded.expires''',
                   (offer['product_id'], json.dumps(offer, ensure_ascii=False), now, expires))
 
-    def discard(self, product):
-        with self.db:
-            self.db.execute('DELETE FROM radar_queue WHERE product=?', (product,))
+    def discard(self, product, *, selected=None):
+        if not selected or selected.get('table') != 'radar_queue' or selected.get('key') != product:
+            return 0
+        return discard_selected(self.db, selected)
 
     def badge(self, offer, channel, now=None):
         now = time.time() if now is None else now
@@ -147,19 +149,20 @@ class Intelligence:
              (offer['product_id'], channel)).fetchone()
         return bool(last and last[2] == key and now - last[1] >= DAY and value < last[0])
 
-    def record(self, offer, channel, message_id, now=None):
+    def record(self, offer, channel, message_id, now=None, *, selected=None):
         now = time.time() if now is None else now
         value = cents(offer)
         if not value:
             if offer.get('source') == 'kabum_awin_coupon':
-                self.db.execute('DELETE FROM radar_queue WHERE product=?', (offer['product_id'],))
+                self.discard(offer['product_id'], selected=selected)
             return
         # Transação do chamador: a confirmação e o histórico são atômicos.
         self.db.execute('INSERT OR IGNORE INTO price_history '
                         '(product,comparison,cents,published,channel,message_id,payload) VALUES (?,?,?,?,?,?,?)',
                         (offer['product_id'], comparison_key(offer), value, now, channel,
                          message_id, json.dumps(offer, ensure_ascii=False)))
-        self.db.execute('DELETE FROM radar_queue WHERE product=?', (offer['product_id'],))
+        if selected and selected.get('table') == 'radar_queue':
+            self.discard(selected['key'], selected=selected)
         if offer.get('source') == 'shopee_api' and offer.get('tema_radar'):
             self.db.execute('INSERT OR REPLACE INTO radar_rotation VALUES (?,?)',
                             (offer['tema_radar'], now))
@@ -171,7 +174,7 @@ class Intelligence:
         return not states or (all(state[0] == 'sent' for state in states)
                               and self.can_repeat(offer, channel, now))
 
-    def pending(self, channel='', now=None):
+    def pending(self, channel='', now=None, *, include_selection=False):
         now = time.time() if now is None else now
         with self.db:
             self.db.execute('DELETE FROM radar_queue WHERE expires<=?', (now,))
@@ -180,6 +183,8 @@ class Intelligence:
             offer = json.loads(payload)
             if not self.publication_eligible(offer, channel, now):
                 continue
+            if include_selection:
+                offer['_queue_selection'] = selection('radar_queue', product, payload)
             offers.append(offer)
         rotation = dict(self.db.execute('SELECT theme,published FROM radar_rotation'))
         # Marca, categoria premium e histórico influenciam o ranking.
