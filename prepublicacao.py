@@ -345,12 +345,22 @@ class PrePublicationGate:
                     retry_after=300,
                 )
             try:
-                return ml_coupons.prepare_alert(prepared)
+                fresh = ml_coupons.prepare_alert(prepared)
             except AffiliateError:
                 self.reject(
                     prepared, "CUPOM_INVALIDO",
                     "Gate: lista de cupons Mercado Livre inválida.", retry_after=300,
                 )
+            fresh, validity = ml_coupons.validate_deadlines(fresh, datetime.now(timezone.utc))
+            if validity == 'expired':
+                self.reject(fresh, 'CUPOM_EXPIRADO',
+                    'Gate: prazo explícito da lista de cupons Mercado Livre já encerrou.',
+                    discard=True, retry_after=0)
+            if validity == 'unknown':
+                self.reject(fresh, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                    'Gate: validade ou associação do prazo Mercado Livre não pôde ser confirmada.',
+                    retry_after=300)
+            return fresh
         if store == "Shopee":
             from cupons_shopee import alert_key, deadline_status
             entries = prepared.get("entries") or []

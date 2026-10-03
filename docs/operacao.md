@@ -429,6 +429,27 @@ A proteção vale enquanto a origem está persistida na fila; a deduplicação d
 publicações após consumo/expiração continua sendo responsabilidade do ledger.
 Um rollback de código pode ignorar as colunas extras, mas perde esta proteção.
 
+### Validade textual dos cupons Mercado Livre
+
+O Gate avalia o prazo comercial explícito antes de aprovar uma lista ML.
+Recência da captura e `prepare_alert()` não comprovam validade comercial.
+Reutiliza o parser temporal puro da Shopee: America/Sao_Paulo, hora explícita
+com limite exclusivo e data sem hora válida até a meia-noite seguinte exclusiva.
+
+Prazo na mesma linha do código pertence àquela entrada. Prazo separado antes
+ou depois das entradas é global e aplica-se a todas; entre entradas ou citando
+um código específico tem associação incerta e bloqueia a lista. Prazo global
+vencido gera `CUPOM_EXPIRADO` (descarte da revisão, retry zero); prazo incerto
+gera `CUPOM_VALIDADE_NAO_CONFIRMADA` (sem descarte, retry 300 segundos).
+Sem indicação de prazo, permanece a política atual de recência.
+
+Entradas individuais vencidas/incertas podem ser excluídas de listas mistas
+somente quando suas condições não deixam referências soltas. A linha completa
+é removida, sem mutar o original; texto, entries e identidade são recalculados.
+Qualificadores globais explícitos são preservados. Condições separadas sem
+escopo comprovável impedem a filtragem, em vez de serem reassociadas. Uma nova
+revisão com prazo futuro pode ser reavaliada. A análise é local, sem novo HTTP.
+
 ### Validade textual dos cupons Shopee
 
 O Gate avalia o prazo explícito nas condições de cada entrada, usando

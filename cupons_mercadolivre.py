@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import requests
 from shopee_afiliados import AffiliateError
 from telegram_api import send_telegram
+from cupons_shopee import DEADLINE_MARKER, deadline_status
 
 # Inclui links sem protocolo, Markdown, HTML e convites/usuários de grupos.
 LINK = re.compile(r'(?i)(?:https?://|www\.)[^\s<>]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>]*)?|@\w+')
@@ -142,6 +143,63 @@ def prepare_alert(alert):
     if visible_length(alert_caption(result)) > 4096:
         raise AffiliateError('Lista ML excede 4096 caracteres: mantida na fila, sem cortar ou dividir cupons.')
     return result
+
+
+def validate_deadlines(alert, now):
+    """Retorna (lista elegível, status), preservando qualificadores globais.
+
+    Prazo na linha do código é individual. Fora das entries, antes/depois
+    da lista é global; entre entries ou citando código é associação incerta.
+    """
+    lines = [line for line in alert['text'].splitlines() if line.strip()]
+    items = {index: entries(line)[0] for index, line in enumerate(lines) if entries(line)}
+    if not items:
+        raise AffiliateError('Lista ML sem entradas para verificar validade.')
+    first, last = min(items), max(items)
+    global_states = []
+    global_lines = set()
+    for index, line in enumerate(lines):
+        if index in items or not DEADLINE_MARKER.search(line):
+            continue
+        if first < index < last or any(
+                re.search(r'\b' + re.escape(item['code']) + r'\b', line)
+                for item in items.values()):
+            global_states.append('unknown')
+            continue
+        clause = line
+        global_lines.add(index)
+        # Uma quebra de linha entre o rótulo e a data não muda a associação.
+        if index + 1 not in items and index + 1 < len(lines) and re.match(
+                r'^\d{1,2}/\d{1,2}/', lines[index + 1]):
+            clause += ' ' + lines[index + 1]
+            global_lines.add(index + 1)
+        global_states.append(deadline_status(clause, now))
+    if 'expired' in global_states:
+        return alert, 'expired'
+    if 'unknown' in global_states:
+        return alert, 'unknown'
+    states = {index: deadline_status(item['conditions'], now) for index, item in items.items()}
+    removed = {index for index, state in states.items() if state in ('expired', 'unknown')}
+    if len(removed) == len(items):
+        return alert, 'unknown' if 'unknown' in states.values() else 'expired'
+    if not removed:
+        return alert, 'active'
+    # Não deixar referência solta/condição de um código removido na lista final.
+    removed_codes = [items[index]['code'] for index in removed]
+    if any(re.search(r'\b' + re.escape(code) + r'\b', line)
+           for index, line in enumerate(lines) if index not in items for code in removed_codes):
+        return alert, 'unknown'
+    # Condição solta sem escopo explícito pode pertencer ao cupom removido.
+    # Não a eliminar nem a transferir silenciosamente aos cupons restantes.
+    for index, line in enumerate(lines):
+        if index in items or index in global_lines or index == 0:
+            continue
+        if not re.search(r'^(?:condições gerais\b|para todos os cupons\b|#?an[uú]ncio$)', line, re.I):
+            return alert, 'unknown'
+    text = '\n\n'.join(line for index, line in enumerate(lines) if index not in removed)
+    eligible = entries(text)
+    return dict(alert, text=text, entries=eligible,
+                product_id=alert_key(eligible, alert['source_date'], text)), 'active'
 
 
 def banner_path(base):
