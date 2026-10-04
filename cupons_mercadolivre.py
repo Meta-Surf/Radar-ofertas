@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import requests
 from shopee_afiliados import AffiliateError
 from telegram_api import send_telegram
-from cupons_shopee import DEADLINE_MARKER, deadline_status
+from cupons_shopee import DEADLINE_MARKER, deadline_status, deadline_metadata
 
 # Inclui links sem protocolo, Markdown, HTML e convites/usuários de grupos.
 LINK = re.compile(r'(?i)(?:https?://|www\.)[^\s<>]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>]*)?|@\w+')
@@ -145,18 +145,14 @@ def prepare_alert(alert):
     return result
 
 
-def validate_deadlines(alert, now):
-    """Retorna (lista elegível, status), preservando qualificadores globais.
-
-    Prazo na linha do código é individual. Fora das entries, antes/depois
-    da lista é global; entre entries ou citando código é associação incerta.
-    """
+def _deadline_layout(alert):
+    """Associação global/individual compartilhada por filtro e prova final."""
     lines = [line for line in alert['text'].splitlines() if line.strip()]
     items = {index: entries(line)[0] for index, line in enumerate(lines) if entries(line)}
     if not items:
         raise AffiliateError('Lista ML sem entradas para verificar validade.')
     first, last = min(items), max(items)
-    global_states = []
+    global_clauses = []
     global_lines = set()
     for index, line in enumerate(lines):
         if index in items or not DEADLINE_MARKER.search(line):
@@ -164,7 +160,7 @@ def validate_deadlines(alert, now):
         if first < index < last or any(
                 re.search(r'\b' + re.escape(item['code']) + r'\b', line)
                 for item in items.values()):
-            global_states.append('unknown')
+            global_clauses.append(None)
             continue
         clause = line
         global_lines.add(index)
@@ -173,7 +169,23 @@ def validate_deadlines(alert, now):
                 r'^\d{1,2}/\d{1,2}/', lines[index + 1]):
             clause += ' ' + lines[index + 1]
             global_lines.add(index + 1)
-        global_states.append(deadline_status(clause, now))
+        global_clauses.append(clause)
+    return lines, items, global_clauses, global_lines
+
+
+def deadline_evidence(alert):
+    """Prazos da lista FINAL, sem relógio e sem refazer sua filtragem."""
+    _, items, clauses, _ = _deadline_layout(alert)
+    if list(items.values()) != alert.get('entries'):
+        raise ValueError('Entradas ML não correspondem ao texto aprovado')
+    return {'global': [deadline_metadata(clause) for clause in clauses],
+            'entries': [deadline_metadata(item['conditions']) for item in items.values()]}
+
+
+def validate_deadlines(alert, now):
+    """Filtra pela associação existente, preservando qualificadores globais."""
+    lines, items, clauses, global_lines = _deadline_layout(alert)
+    global_states = [deadline_status(clause, now) for clause in clauses]
     if 'expired' in global_states:
         return alert, 'expired'
     if 'unknown' in global_states:

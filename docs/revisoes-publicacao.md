@@ -130,3 +130,37 @@ oferta antes de preparar, executa o mesmo Gate e usa a mesma autorização.
 Assim não existe bypass do período pelo modo antigo de envio. Timeout depois
 da autorização conserva UNCERTAIN vinculado; confirmação usa a seleção exata.
 O serviço de produção permanece em `--enfileirar`, sem envio direto ativado.
+
+## Prazo de alertas capturados ML/Shopee
+
+Para `kind=coupon_alert/source=telegram/store=Mercado Livre|Shopee`, Gate
+produz `_coupon_deadline_proof` somente depois da filtragem já existente.
+A prova liga a seleção original e seu digest semântico à identidade final,
+texto/códigos/condições/URLs/entries aprovados e seus prazos normalizados.
+SHA-256 determinístico cobre conteúdo e associações; nenhum relógio do Gate
+ou da autorização entra na prova. `unspecified` é explícito e não recebe TTL.
+
+ML compartilha a mesma associação global/individual de validate_deadlines;
+Shopee compartilha deadline_status/deadline_metadata. A gramática, timezone
+Brasília, data sem hora até meia-noite seguinte e limite exclusivo permanecem.
+Não existe terceiro parser temporal na autorização.
+
+O publicador remove a prova privada e passa o mesmo objeto final e a prova
+separadamente a mark_sending. Dentro do protocolo da seleção/reserva,
+depois do lock SQLite, confere revisão, prova e digest do alerta final. Só
+depois dessa conferência lê o relógio e compara os deadlines antes do UPDATE
+RESERVED → SENDING. Não reinterpreta a captura bruta, não refiltra entries,
+não muda texto/identidade e não faz rede/link/API sob transação.
+
+Qualquer prazo aprovado encerrado bloqueia o conjunto inteiro com
+CUPOM_EXPIRADO. Prova ausente/unknown/malformada ou divergente bloqueia com
+CUPOM_VALIDADE_NAO_CONFIRMADA. Cancela apenas a reserva própria ainda
+RESERVED, vinculada à seleção. Nova revisão, outra origem/day e estados
+SENT/SENDING/UNCERTAIN ficam preservados. Uma próxima rodada pode voltar
+ao Gate, filtrar a lista restante e gerar sua nova identidade normalmente.
+
+Depois do commit SENDING a tentativa externa prevalece: expiração durante
+Telegram não regride para RESERVED. Confirma o conteúdo enviado ou conserva
+UNCERTAIN em falha/crash. Provas privadas não chegam ao sender, caption,
+delivery confirmada nem source_offer público do shadow. TTL/pruning,
+intervalos, indicador e schema não mudam.

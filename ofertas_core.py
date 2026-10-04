@@ -482,7 +482,12 @@ class Ledger:
             raise
         return day if result.rowcount else None
 
-    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None, shopee_period_proof=None):
+    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None, shopee_period_proof=None, coupon_deadline_proof=None, approved_offer=None):
+        if (selected is None and isinstance(approved_offer, dict)
+                and approved_offer.get('kind') == 'coupon_alert' and approved_offer.get('source') == 'telegram'
+                and approved_offer.get('store') in ('Mercado Livre', 'Shopee')):
+            self.authorization_reason = 'CUPOM_VALIDADE_NAO_CONFIRMADA'
+            return False
         if selected is not None:
             from revisao_publicacao import catalog_guard, immediate, matches, selection_id, current_row
             self.authorization_reason = 'RESERVA_INVALIDA'
@@ -530,6 +535,15 @@ class Ledger:
                                 'not_started':'CUPOM_NAO_INICIADO', 'active':''}[status]
                         except (TypeError, ValueError):
                             self.authorization_reason = 'CUPOM_VALIDADE_NAO_CONFIRMADA'
+                        if self.authorization_reason:
+                            self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                            (product_id, day))
+                            return False
+                    if (payload.get('kind') == 'coupon_alert' and payload.get('source') == 'telegram'
+                            and payload.get('store') in ('Mercado Livre', 'Shopee')):
+                        from cupom_validade import authorization_status
+                        self.authorization_reason = authorization_status(coupon_deadline_proof, payload,
+                            approved_offer, selected, product_id, time.time)
                         if self.authorization_reason:
                             self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
                                             (product_id, day))

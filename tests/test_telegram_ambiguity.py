@@ -125,7 +125,7 @@ class PublisherAmbiguityTests(unittest.TestCase):
                         return response(body, status)
                     return response({'ok': True, 'result': {'message_id': accepted[-1]}})
                 gate = Mock()
-                gate.validate.side_effect = lambda original, prepared, channel: prepared
+                gate.validate.side_effect = lambda original, prepared, channel, *, selected=None: prepared
                 metrics = Mock()
                 shadow = Mock()
                 with ExitStack() as stack:

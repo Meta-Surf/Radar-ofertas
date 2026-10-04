@@ -483,7 +483,7 @@ class PrePublicationGate:
             self.reject(prepared, 'OFERTA_NAO_INICIADA', 'Gate: período da oferta Shopee ainda não iniciou.')
         return refreshed
 
-    def validate(self, original, prepared, channel=""):
+    def validate(self, original, prepared, channel="", *, selected=None):
         """Retorna a versão final a publicar ou levanta GateReject."""
         original = dict(original)
         current = dict(prepared)
@@ -491,6 +491,14 @@ class PrePublicationGate:
 
         if is_coupon:
             current = self._validate_coupon(original, current)
+            if (current.get('source') == 'telegram'
+                    and current.get('store') in ('Mercado Livre', 'Shopee')):
+                from cupom_validade import build_proof
+                try:
+                    current['_coupon_deadline_proof'] = build_proof(original, current, selected)
+                except (KeyError, TypeError, ValueError):
+                    self.reject(current, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: prova do conteúdo final do cupom não pôde ser confirmada.', retry_after=300)
             self._check_duplicate(current, channel)
             self._record(current, "APROVADA", "CUPOM_REVALIDADO")
             current["prepublication_checked_at"] = time.time()

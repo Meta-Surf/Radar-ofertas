@@ -26,32 +26,25 @@ DEADLINE_DATE = re.compile(
     r'(?:\s+(?:[àa]s\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?)?')
 
 
-def deadline_status(conditions, now=None):
-    """Prazo explícito: active/expired/unknown; sem prazo: unspecified.
-
-    Limite exclusivo; data sem hora vale até a meia-noite do dia seguinte.
-    Ano ausente ou timezone não reconhecido não autoriza inferência.
-    """
+def deadline_metadata(conditions):
+    """Mesma gramática de validade, normalizada sem relógio ou filtragem."""
     if not isinstance(conditions, str):
-        return 'unknown'
+        return {'kind': 'unknown', 'ends': []}
     text = re.sub(r'\s+', ' ', html.unescape(conditions).replace('*', '')).strip()
     markers = list(DEADLINE_MARKER.finditer(text))
     if not markers:
-        return 'unspecified'
-    now = now or datetime.now(COMMERCIAL_TZ)
-    if now.tzinfo is None:
-        raise ValueError('Relógio de validade precisa de timezone explícito.')
-    states = []
+        return {'kind': 'unspecified', 'ends': []}
+    ends, unknown = [], False
     for index, marker in enumerate(markers):
         end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
         clause = text[marker.end():end]
         match = DEADLINE_DATE.match(clause)
         if not match:
-            states.append('unknown')
+            unknown = True
             continue
         suffix = clause[match.end():].strip(' .!;()').casefold()
         if suffix not in ('', 'america/sao_paulo', 'horário de brasília', 'horario de brasilia'):
-            states.append('unknown')
+            unknown = True
             continue
         day, month, year, hour, minute, second = match.groups()
         try:
@@ -59,12 +52,26 @@ def deadline_status(conditions, now=None):
                 int(hour or 0), int(minute or 0), int(second or 0), tzinfo=COMMERCIAL_TZ)
             if hour is None:
                 deadline += timedelta(days=1)
-            states.append('expired' if now >= deadline else 'active')
+            ends.append(int(deadline.timestamp()))
         except (ValueError, OverflowError):
-            states.append('unknown')
-    if 'expired' in states:
+            unknown = True
+    return {'kind': 'unknown' if unknown else 'explicit', 'ends': ends}
+
+
+def deadline_status(conditions, now=None):
+    """Limite exclusivo; data sem hora vai até a meia-noite seguinte."""
+    metadata = deadline_metadata(conditions)
+    if metadata['kind'] == 'unspecified':
+        return 'unspecified'
+    # Texto inválido não tinha relógio/declaração temporal a interpretar.
+    if not isinstance(conditions, str):
+        return 'unknown'
+    now = now or datetime.now(COMMERCIAL_TZ)
+    if now.tzinfo is None:
+        raise ValueError('Relógio de validade precisa de timezone explícito.')
+    if any(now.timestamp() >= end for end in metadata['ends']):
         return 'expired'
-    return 'unknown' if 'unknown' in states else 'active'
+    return 'unknown' if metadata['kind'] == 'unknown' else 'active'
 
 def allowed(url, hosts):
     try:

@@ -513,7 +513,7 @@ def run_publisher(args, parser):
 
                 gate_started = time.perf_counter()
                 try:
-                    offer = gate.validate(original_offer, offer, channel)
+                    offer = gate.validate(original_offer, offer, channel, selected=selected)
                     key = offer['product_id']
                 except GateReject as error:
                     runtime_metrics.record(
@@ -597,10 +597,12 @@ def run_publisher(args, parser):
                 catalog_proof = offer.pop('_catalog_revision', None)
                 voucher_proof = offer.pop('_voucher_proof', None)
                 shopee_period_proof = offer.pop('_shopee_period_proof', None)
+                coupon_deadline_proof = offer.pop('_coupon_deadline_proof', None)
                 try:
                     authorized = ledger.mark_sending(key, day, selected=selected,
                         catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof,
-                        voucher_proof=voucher_proof, shopee_period_proof=shopee_period_proof)
+                        voucher_proof=voucher_proof, shopee_period_proof=shopee_period_proof,
+                        coupon_deadline_proof=coupon_deadline_proof, approved_offer=offer)
                 except sqlite3.Error:
                     ledger.cancel_reserved_selection(key, day, selected)
                     row_backoff.failure(source_key, revision_id, 'AUTORIZACAO_INDISPONIVEL', base=60)
