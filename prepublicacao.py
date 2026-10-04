@@ -308,7 +308,7 @@ class PrePublicationGate:
                 "Gate: produto KaBuM explicitamente indisponível.", discard=True,
             )
         return fresh
-    def _validate_kabum_coupon(self, offer):
+    def _validate_kabum_coupon(self, original, offer):
         from awin_kabum import AwinKabumAPI
         api = AwinKabumAPI.from_env()
         if not api.enabled or self.kabum_affiliate is None:
@@ -326,33 +326,39 @@ class PrePublicationGate:
                 "Gate: Offers API Awin não respondeu à revalidação.", retry_after=300,
                 details=type(exc).__name__,
             )
-        pid = str(offer.get("promotion_id") or "")
-        current = next(
-            (item for item in offers if str(item.get("promotionId") or "") == pid),
-            None,
-        )
-        if current is None:
-            self.reject(
-                offer, "CUPOM_INATIVO",
-                "Gate: cupom KaBuM não consta mais entre as ofertas oficiais ativas.",
-                discard=True, retry_after=0,
-            )
         try:
-            fresh = cupons_kabum.alert_from_offer(
-                current, self.kabum_affiliate
-            )
+            persisted = cupons_kabum.alert_unit(original)
+            if not isinstance(offers, list):
+                raise ValueError('Lista Awin inválida')
+            matching = [item for item in offers if isinstance(item, dict)
+                        and str(item.get('promotionId') or '') == persisted['promotion_id']]
+            units = [cupons_kabum.commercial_unit(item) for item in matching]
+            if not units or any(unit != units[0] for unit in units):
+                raise ValueError('Promoção ausente ou ambígua')
+        except (TypeError, ValueError):
+            self.reject(offer, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                        'Gate: unidade comercial KaBuM ausente, incompleta ou ambígua.', retry_after=300)
+        if units[0] != persisted:
+            self.reject(offer, 'REVISAO_COMERCIAL_ALTERADA',
+                        'Gate: promoção mudou; aguardar nova revisão persistida pelo coletor.', retry_after=300)
+        reason = cupons_kabum.period_reason(persisted, datetime.now(timezone.utc).timestamp())
+        if reason:
+            self.reject(offer, reason, 'Gate: cupom fora do período comercial nativo.',
+                        discard=reason == 'CUPOM_EXPIRADO', retry_after=0 if reason == 'CUPOM_EXPIRADO' else 300)
+        try:
+            fresh = cupons_kabum.alert_from_offer(matching[0], self.kabum_affiliate)
+            fresh = cupons_kabum.prepare_alert(self.kabum_affiliate, fresh)
         except AffiliateError:
             self.reject(
-                offer, "CUPOM_EXPIRADO",
-                "Gate: cupom KaBuM expirou ou deixou de atender aos critérios.",
-                discard=True, retry_after=0,
+                offer, "CUPOM_VALIDADE_NAO_CONFIRMADA",
+                "Gate: cupom KaBuM deixou de atender aos critérios.", retry_after=300,
             )
         return fresh
 
     def _validate_coupon(self, original, prepared):
         store = prepared.get("store")
         if store == "KaBuM":
-            return self._validate_kabum_coupon(prepared)
+            return self._validate_kabum_coupon(original, prepared)
         if store == "Mercado Livre":
             if self._age_seconds(original) > self.source_price_max_age:
                 self.reject(
@@ -491,6 +497,12 @@ class PrePublicationGate:
 
         if is_coupon:
             current = self._validate_coupon(original, current)
+            if cupons_kabum.is_native_alert(current):
+                try:
+                    current['_kabum_coupon_proof'] = cupons_kabum.build_proof(original, current, selected)
+                except (KeyError, TypeError, ValueError):
+                    self.reject(current, 'CUPOM_VALIDADE_NAO_CONFIRMADA',
+                                'Gate: prova nativa do alerta KaBuM não pôde ser confirmada.', retry_after=300)
             if (current.get('source') == 'telegram'
                     and current.get('store') in ('Mercado Livre', 'Shopee')):
                 from cupom_validade import build_proof

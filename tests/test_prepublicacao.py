@@ -242,7 +242,7 @@ class GateTests(unittest.TestCase):
             gate.validate(prepared, dict(prepared), "@canal")
         api.offers.assert_called_once()
 
-    def test_kabum_coupon_missing_from_api_blocks_as_inactive(self):
+    def test_kabum_coupon_missing_from_api_waits_for_confirmation(self):
         import cupons_kabum
         item = self.kabum_coupon_item()
         prepared = cupons_kabum.alert_from_offer(item, self.kabum)
@@ -252,7 +252,7 @@ class GateTests(unittest.TestCase):
         with patch("awin_kabum.AwinKabumAPI.from_env", return_value=api):
             with self.assertRaises(GateReject) as ctx:
                 gate.validate(prepared, dict(prepared), "@canal")
-        self.assertEqual(ctx.exception.reason, "CUPOM_INATIVO")
+        self.assertEqual(ctx.exception.reason, "CUPOM_VALIDADE_NAO_CONFIRMADA")
 
     def amazon_offer(self, price="100,00"):
         return {

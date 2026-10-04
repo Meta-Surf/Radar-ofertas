@@ -164,3 +164,37 @@ Telegram não regride para RESERVED. Confirma o conteúdo enviado ou conserva
 UNCERTAIN em falha/crash. Provas privadas não chegam ao sender, caption,
 delivery confirmada nem source_offer público do shadow. TTL/pruning,
 intervalos, indicador e schema não mudam.
+
+## Alerta genérico KaBuM/Awin
+
+Somente `coupon_alert/kabum_awin_coupon/KaBuM` persiste a unidade nativa
+`kabum_coupon_unit` no JSON existente: advertiser 17729, promotion_id, tipo,
+código, destino oficial, início/fim UTC com offset obrigatório e texto/termos
+nativos. O ID base permanece `KaBuMCoupon:<promotion_id>`. Horários de coleta,
+score, urgência, tracking e TTL não definem identidade comercial. Condições
+nativas são preservadas mesmo quando sua URL não aparece na legenda limpa.
+Não há alteração de schema. Entradas legadas sem essa evidência aguardam o
+refresh normal do coletor, sem migração presumindo termos não persistidos.
+
+O Gate compara todas as correspondências Awin oficiais. Só colapsa unidades
+semanticamente idênticas; ausência, resposta parcial ou conflito gera retry
+`CUPOM_VALIDADE_NAO_CONFIRMADA`. Falha de API gera `VALIDACAO_INDISPONIVEL`.
+Uma mudança de início/fim, código, destino ou condição gera
+`REVISAO_COMERCIAL_ALTERADA`: não renova a seleção antiga em memória. O ciclo
+normal de collect_alerts/enqueue grava a nova revisão, distinguida pelo digest
+do payload. O cache de lista continua em 60s e o período é recalculado em cada
+Gate: início inclusivo, fim exclusivo, sem interpretação textual ou fim do dia.
+
+Depois de confirmar a mesma unidade, `_kabum_coupon_proof` liga seleção,
+digest comercial e conteúdo final (incluindo tracking) sem relógios voláteis.
+O publicador extrai essa prova privada antes do sender/shadow. Sob o protocolo
+existente, mark_sending verifica primeiro binding e digest persistidos. Depois
+de qualquer espera por lock e de todas as comparações, confere a prova e lê o
+relógio local junto ao UPDATE, sem API ou geração de links na transação.
+O TTL `queue_expires_at=end_date` é uma defesa adicional, preservada.
+
+Antes de sending, falha cancela somente product/day reservado com o binding
+conferido; não remove a revisão nova nem SENT/SENDING/UNCERTAIN ou outro dia.
+Depois do commit sending, expiração durante o envio não desfaz a tentativa:
+confirmação, incerteza e recuperação de crash seguem o protocolo anterior,
+registrando o conteúdo efetivamente enviado e preservando outra revisão.

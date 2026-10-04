@@ -482,7 +482,11 @@ class Ledger:
             raise
         return day if result.rowcount else None
 
-    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None, shopee_period_proof=None, coupon_deadline_proof=None, approved_offer=None):
+    def mark_sending(self, product_id, day, *, selected=None, catalog_path=None, catalog_proof=None, voucher_proof=None, shopee_period_proof=None, coupon_deadline_proof=None, kabum_coupon_proof=None, approved_offer=None):
+        from cupons_kabum import is_native_alert
+        if selected is None and is_native_alert(approved_offer):
+            self.authorization_reason = 'CUPOM_VALIDADE_NAO_CONFIRMADA'
+            return False
         if (selected is None and isinstance(approved_offer, dict)
                 and approved_offer.get('kind') == 'coupon_alert' and approved_offer.get('source') == 'telegram'
                 and approved_offer.get('store') in ('Mercado Livre', 'Shopee')):
@@ -500,11 +504,17 @@ class Ledger:
                         (product_id, day)).fetchone()
                     if not binding or binding[0] != selection_id(selected):
                         return False
-                    if not source_matches or not matches(self.db, selected):
+                    if not source_matches or not matches(self.db, selected, require_active=False):
                         self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
                                         (product_id, day))
                         return False
-                    payload = json.loads(current_row(self.db, selected)[0])
+                    row = current_row(self.db, selected)
+                    payload = json.loads(row[0])
+                    native_coupon = is_native_alert(payload)
+                    if not native_coupon and not matches(self.db, selected):
+                        self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                        (product_id, day))
+                        return False
                     if (payload.get('source') == 'shopee_api'
                             and payload.get('kind') != 'coupon_alert' and payload.get('publish_mode') != 'mirror'):
                         from radar_shopee import product_offer_period, product_period_status
@@ -544,6 +554,21 @@ class Ledger:
                         from cupom_validade import authorization_status
                         self.authorization_reason = authorization_status(coupon_deadline_proof, payload,
                             approved_offer, selected, product_id, time.time)
+                        if self.authorization_reason:
+                            self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
+                                            (product_id, day))
+                            return False
+                    if native_coupon:
+                        from cupons_kabum import authorization_status
+                        authorization_moment = []
+                        def authorization_clock():
+                            moment = time.time()
+                            authorization_moment.append(moment)
+                            return moment
+                        self.authorization_reason = authorization_status(kabum_coupon_proof, payload,
+                            approved_offer, selected, product_id, authorization_clock)
+                        if not self.authorization_reason and row[1] <= authorization_moment[0]:
+                            self.authorization_reason = 'RESERVA_INVALIDA'
                         if self.authorization_reason:
                             self.db.execute("DELETE FROM posts WHERE product=? AND day=? AND status='reserved'",
                                             (product_id, day))

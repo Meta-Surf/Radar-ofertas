@@ -598,11 +598,13 @@ def run_publisher(args, parser):
                 voucher_proof = offer.pop('_voucher_proof', None)
                 shopee_period_proof = offer.pop('_shopee_period_proof', None)
                 coupon_deadline_proof = offer.pop('_coupon_deadline_proof', None)
+                kabum_coupon_proof = offer.pop('_kabum_coupon_proof', None)
                 try:
                     authorized = ledger.mark_sending(key, day, selected=selected,
                         catalog_path=BASE / 'kabum_historico.sqlite3', catalog_proof=catalog_proof,
                         voucher_proof=voucher_proof, shopee_period_proof=shopee_period_proof,
-                        coupon_deadline_proof=coupon_deadline_proof, approved_offer=offer)
+                        coupon_deadline_proof=coupon_deadline_proof, kabum_coupon_proof=kabum_coupon_proof,
+                        approved_offer=offer)
                 except sqlite3.Error:
                     ledger.cancel_reserved_selection(key, day, selected)
                     row_backoff.failure(source_key, revision_id, 'AUTORIZACAO_INDISPONIVEL', base=60)

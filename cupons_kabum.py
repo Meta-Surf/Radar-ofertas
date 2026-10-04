@@ -1,6 +1,8 @@
 """Cupons oficiais KaBuM obtidos exclusivamente pela Offers API da Awin."""
 import html
+import copy
 import json
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,7 +25,8 @@ MAX_START_AGE_DAYS = 90
 
 def _dt(value):
     try:
-        return datetime.fromisoformat(str(value or "").replace("Z", "+00:00")).astimezone(timezone.utc)
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.utcoffset() is not None else None
     except (TypeError, ValueError):
         return None
 
@@ -52,7 +55,9 @@ def safe_destination(url):
 
 def eligible(item, now=None):
     """Aceita somente voucher oficial, atual, não ligado diretamente a produto."""
-    if not isinstance(item, dict) or item.get("type") != "voucher":
+    try:
+        commercial_unit(item)
+    except (TypeError, ValueError):
         return False
     advertiser = item.get("advertiser") or {}
     if str(advertiser.get("id") or "") != ADVERTISER_ID or advertiser.get("joined") is False:
@@ -76,6 +81,98 @@ def eligible(item, now=None):
     if not clean_text(item.get("title") or item.get("description")):
         return False
     return True
+
+
+def commercial_unit(item):
+    """Identidade nativa, sem relógio, tracking ou metadados de observação."""
+    from awin_kabum import AwinKabumAPI
+    if (not isinstance(item, dict) or not isinstance(item.get('advertiser'), dict)
+            or not isinstance(item.get('voucher'), dict)
+            or not AwinKabumAPI._official_kabum_offer(item) or item.get('type') != 'voucher'):
+        raise ValueError('Voucher oficial ausente')
+    pid = str(item.get('promotionId') or '').strip()
+    code = str(item['voucher'].get('code') or '').strip()
+    target = str(item.get('url') or '').strip()
+    start, end = _dt(item.get('startDate')), _dt(item.get('endDate'))
+    if (not pid.isdigit() or not CODE_RE.fullmatch(code) or not safe_destination(target)
+            or product(target) or not start or not end or start >= end
+            or not clean_text(item.get('title') or item.get('description'))):
+        raise ValueError('Unidade comercial incompleta')
+    return {'advertiser_id': ADVERTISER_ID, 'promotion_id': pid, 'type': 'voucher',
+            'code': code, 'destination_url': target, 'start_date': start.isoformat(),
+            'end_date': end.isoformat(),
+            # Preserva também URLs/condições que não aparecem na legenda limpa.
+            **{key: str(item.get(key) or '').strip() for key in ('title', 'description', 'terms')}}
+
+
+def alert_unit(alert):
+    if not is_native_alert(alert) or not isinstance(alert.get('kabum_coupon_unit'), dict):
+        raise ValueError('Evidência nativa ausente')
+    unit = alert['kabum_coupon_unit']
+    normalized = commercial_unit({'advertiser': {'id': unit.get('advertiser_id')},
+        'promotionId': unit.get('promotion_id'), 'type': unit.get('type'),
+        'voucher': {'code': unit.get('code')}, 'url': unit.get('destination_url'),
+        'startDate': unit.get('start_date'), 'endDate': unit.get('end_date'),
+        **{key: unit.get(key) for key in ('title', 'description', 'terms')}})
+    if (normalized != unit or alert.get('product_id') != 'KaBuMCoupon:' + unit['promotion_id']
+            or any(alert.get(key) != unit[key] for key in
+                   ('promotion_id', 'code', 'destination_url', 'start_date', 'end_date'))
+            or any(alert.get(key) != clean_text(unit[key]) for key in ('title', 'description', 'terms'))):
+        raise ValueError('Alerta diverge da unidade nativa')
+    return copy.deepcopy(unit)
+
+
+def is_native_alert(alert):
+    return (isinstance(alert, dict) and alert.get('kind') == 'coupon_alert'
+            and alert.get('source') == 'kabum_awin_coupon' and alert.get('store') == 'KaBuM')
+
+
+def period_reason(unit, now):
+    if not math.isfinite(now):
+        raise ValueError('Relógio inválido')
+    if now < _dt(unit['start_date']).timestamp():
+        return 'CUPOM_NAO_INICIADO'
+    return 'CUPOM_EXPIRADO' if now >= _dt(unit['end_date']).timestamp() else ''
+
+
+def _approved_content(alert):
+    return copy.deepcopy({key: alert.get(key) for key in (
+        'kind', 'source', 'store', 'product_id', 'promotion_id', 'code', 'destination_url',
+        'start_date', 'end_date', 'title', 'description', 'terms', 'affiliate_url',
+        'affiliate_generated', 'kabum_coupon_unit')})
+
+
+def build_proof(original, approved, selected=None):
+    from cupom_validade import fingerprint
+    unit = alert_unit(original)
+    if alert_unit(approved) != unit or not valid_affiliate_url(approved.get('affiliate_url')):
+        raise ValueError('Oferta final não corresponde à revisão comercial')
+    content = _approved_content(approved)
+    body = {'version': 1, 'selection': copy.deepcopy(selected), 'unit': unit,
+            'unit_digest': fingerprint(unit), 'content': content, 'content_digest': fingerprint(content)}
+    return dict(body, digest=fingerprint(body))
+
+
+def authorization_status(proof, original, approved, selected, product_id, clock):
+    """Conferência local sob BEGIN IMMEDIATE; lê o relógio por último."""
+    from cupom_validade import fingerprint
+    try:
+        if (not isinstance(proof, dict) or set(proof) != {
+                'version', 'selection', 'unit', 'unit_digest', 'content', 'content_digest', 'digest'}
+                or type(proof['version']) is not int or proof['version'] != 1
+                or not isinstance(selected, dict) or proof['selection'] != selected):
+            raise ValueError('Prova/seleção inválida')
+        unit, content = alert_unit(original), _approved_content(approved)
+        body = {key: value for key, value in proof.items() if key != 'digest'}
+        if (proof['digest'] != fingerprint(body) or proof['unit'] != unit
+                or proof['unit_digest'] != fingerprint(unit) or alert_unit(approved) != unit
+                or proof['content'] != content or proof['content_digest'] != fingerprint(content)
+                or content['product_id'] != product_id or not valid_affiliate_url(content['affiliate_url'])
+                or content['affiliate_generated'] is not True):
+            raise ValueError('Prova não corresponde ao conteúdo final')
+        return period_reason(unit, clock())
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+        return 'CUPOM_VALIDADE_NAO_CONFIRMADA'
 
 
 def alert_from_offer(item, affiliate, now=None):
@@ -111,6 +208,7 @@ def alert_from_offer(item, affiliate, now=None):
         "source_date": now.isoformat(),
         "radar_score": 1000.0 + urgency,
         "queue_expires_at": end.timestamp(),
+        "kabum_coupon_unit": commercial_unit(item),
     }
 
 
