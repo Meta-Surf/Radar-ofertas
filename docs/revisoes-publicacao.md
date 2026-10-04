@@ -199,6 +199,32 @@ Depois do commit sending, expiração durante o envio não desfaz a tentativa:
 confirmação, incerteza e recuperação de crash seguem o protocolo anterior,
 registrando o conteúdo efetivamente enviado e preservando outra revisão.
 
+## Identidade do destino Amazon
+
+A associação é local: ASIN solicitado, item.asin e ASIN do detailPageURL devem
+coincidir após normalização uppercase, usando o parser de produto existente.
+_parse_item recusa divergência antes de retornar preço/estoque/imagem/link.
+valid_affiliate_url confere HTTPS, host, caminho, porta/userinfo e tag; não
+constitui sozinho prova de que o link pertence ao ASIN solicitado. /dp e
+/gp/product continuam suportados, sem ampliar os formatos aceitos do link.
+
+O Gate repete a associação affiliate_url/URL canônica/product_id, todos Amazon.
+Forma/tag inválidas geram LINK_INVALIDO; ASIN divergente com link válido gera
+PRODUTO_INCONSISTENTE. Também exige que a identidade preparada permaneça igual
+à da captura, protegendo contra preparador alternativo/cache/mutação. Preço e
+disponibilidade continuam com suas validações independentes; a preparação
+continua exigindo imagem e demais condições existentes.
+
+Toda comparação ocorre antes de reserve/mark_sending; nenhuma chamada HTTP
+foi adicionada. Não há cache de resultado comercial Amazon: apenas token OAuth
+do mesmo cliente é reutilizado, com itemIds específicos em cada request_item.
+Recusa antiga mantém as proteções de seleção/revisão contra descarte/backoff
+de uma captura nova; não gera confirmação nem histórico de preço.
+
+Essa proteção não ativa Amazon. Credenciais/configuração/destinos permanecem
+como estavam; validação local usa apenas API e envio simulados. O protocolo
+Ledger, crash, UNCERTAIN e idempotência permanece inalterado.
+
 ## Disponibilidade Mercado Livre automática
 
 O resultado automático do AutoReader inclui `stock_confirmed`, `stock_status`,

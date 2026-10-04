@@ -191,6 +191,15 @@ class PrePublicationGate:
                 offer, "LINK_INVALIDO",
                 "Gate: link de afiliado não pertence a um fluxo validado.", discard=False,
             )
+        if store == "Amazon":
+            affiliate_identity = product(link)
+            canonical_identity = product(str(offer.get("url") or ""))
+            if (not affiliate_identity or not canonical_identity
+                    or affiliate_identity[1] != "Amazon" or canonical_identity[1] != "Amazon"
+                    or affiliate_identity[0] != canonical_identity[0]
+                    or canonical_identity[0] != offer.get("product_id")):
+                self.reject(offer, "PRODUTO_INCONSISTENTE",
+                            "Gate: destino afiliado Amazon diverge do produto validado.", discard=True)
 
     def _check_duplicate(self, offer, channel):
         states = self.db.execute(
@@ -576,6 +585,10 @@ class PrePublicationGate:
                     retry_after=300,
                 )
         elif store == "Amazon":
+            self._check_product_identity(original)
+            if current.get("product_id") != original.get("product_id"):
+                self.reject(current, "PRODUTO_INCONSISTENTE",
+                            "Gate: produto Amazon preparado diverge da captura.", discard=True)
             strong = True
             self._compare_price(original, current, strong=True)
             if current.get("stock_confirmed") is not True:

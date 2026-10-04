@@ -29,6 +29,7 @@ RESOURCES = [
 
 
 def valid_affiliate_url(url, partner_tag=""):
+    """Confere forma/domínio/tag; a associação ao ASIN é uma prova separada."""
     if not isinstance(url, str):
         return False
     try:
@@ -174,9 +175,17 @@ class AmazonCreators:
         return self._parse_item(item, asin)
 
     def _parse_item(self, item, asin):
+        asin = str(asin or "").upper()
+        if (not ASIN_RE.fullmatch(asin) or not isinstance(item, dict)
+                or str(item.get("asin") or "").upper() != asin):
+            raise AffiliateError("Amazon: ASIN do item diverge do solicitado.")
         detail = str(item.get("detailPageURL") or "")
         if not valid_affiliate_url(detail, self.partner_tag):
             raise AffiliateError("Amazon: Creators API não retornou link afiliado válido.")
+        identified = product(detail)
+        if (not identified or identified[1] != "Amazon"
+                or identified[0] != "Amazon:" + asin):
+            raise AffiliateError("Amazon: destino afiliado diverge do ASIN validado.")
         title = str((((item.get("itemInfo") or {}).get("title") or {}).get("displayValue") or "")).strip()
         if not title:
             raise AffiliateError("Amazon: título não retornado pela Creators API.")
