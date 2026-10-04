@@ -5,6 +5,14 @@ from fila_ofertas_sqlite import CapturedOfferQueue, _queue_key
 from revisao_publicacao import selection
 
 
+def structured_stock(url):
+    """Evidência sintética explícita, usada quando o cenário testa preço/revisão."""
+    from ofertas_core import product
+    return {'stock_confirmed': True, 'stock_status': 'in_stock',
+            'stock_source': 'structured_product', 'stock_product_id': product(url)[0],
+            'stock_resolved_url': url}
+
+
 def persisted_rows(offers, base):
     queue = CapturedOfferQueue(Path(base) / 'publicacoes.sqlite3')
     try:

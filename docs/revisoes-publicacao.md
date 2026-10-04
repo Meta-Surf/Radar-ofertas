@@ -198,3 +198,49 @@ conferido; não remove a revisão nova nem SENT/SENDING/UNCERTAIN ou outro dia.
 Depois do commit sending, expiração durante o envio não desfaz a tentativa:
 confirmação, incerteza e recuperação de crash seguem o protocolo anterior,
 registrando o conteúdo efetivamente enviado e preservando outra revisão.
+
+## Disponibilidade Mercado Livre automática
+
+O resultado automático do AutoReader inclui `stock_confirmed`, `stock_status`,
+`stock_source=structured_product`, `stock_product_id` e `stock_resolved_url`.
+Somente disponibilidade explícita InStock do mesmo produto/variante autoriza
+prosseguir. Preço e estoque são obrigações independentes. A ausência da prova
+produz VALIDACAO_INDISPONIVEL/retry; não herda um booleano da captura.
+
+`MLCommercialUnavailable` distingue OutOfStock/SoldOut/Discontinued de falhas
+de leitura. A recusa é propagada por fetch_http, fetch_browser e enrich, sem
+buscar recomendações ou outro fallback. O Gate usa SEM_ESTOQUE_COMPROVADO,
+descartando apenas a seleção/revisão atual; uma captura nova pode ser validada.
+O publicador também trata essa recusa no caminho de preparação ml_offer_pending
+antes do Gate, evitando cadastrá-la como falha transitória/quarentena.
+`MLProductInconsistent` preserva a distinção de produto/variante divergente.
+HTTP403/404/429/500, timeout, captcha, HTML/schema parcial e falha do navegador
+continuam sendo indisponibilidade de validação, não prova de produto removido.
+
+No Perfil Social, preço/imagem/CTA não provam estoque. Avisos negativos no card
+são recusados. Para ofertas automáticas, o navegador faz uma única navegação
+adicional ao CTA oficial exato, limitado a 20s de navegação e 5s de espera por
+schema. Exige InStock estruturado do mesmo produto e parâmetros de variante
+explicitamente presentes; não infere variante. Retorno ao Social/ciclo,
+identidade divergente ou ausência de prova não autorizam publicação. Essa
+confirmação não inicia novo fetch_browser/fallback recursivo. A confirmação já
+lê o preço estruturado desse mesmo item, usado pelo Gate automático para evitar
+conservar preço do card contradito pela leitura oficial.
+Não calcula descontos ou preço de parcelas; a regra de preço maior/igual/menor
+continua a existente. O caminho manual conserva sua leitura do card.
+
+Manual recente e texto especial mirror mantêm suas políticas deliberadas.
+Leitura manual Social não ganha a obrigação automática de confirmação positiva;
+recusas explícitas, quando obtidas pelo leitor, permanecem negativas. O Gate
+não usa prova de uma identidade para liberar outra.
+
+Cache: resultado positivo com prova e recusa comercial tipada usam a chave
+existente de produto/URL/original_url/captura/revisão. TTLs 300s de preparação,
+60s no Gate e limite 128 permanecem. Nova revisão tem nova chave; após TTL há
+reconsulta. Nenhum relógio entra no fingerprint. Não há schema/pruning novos.
+
+Disponibilidade é uma verificação externa feita antes da reserva/autorização.
+Nenhum HTTP/browser foi adicionado ao Ledger ou a BEGIN IMMEDIATE. Estoque
+pode mudar entre essa leitura (ou seu cache curto) e o envio; o sistema não
+promete disponibilidade contínua durante a chamada Telegram. O protocolo de
+revisão, confirmação, UNCERTAIN e crash permanece o já documentado.

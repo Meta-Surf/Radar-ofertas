@@ -217,6 +217,7 @@ class PrePublicationGate:
                 discard=True, retry_after=0,
             )
     def _fresh_ml(self, offer):
+        from mercadolivre_auto import MLCommercialUnavailable, MLProductInconsistent, confirmed_stock, same_product
         if self.ml_reader is None:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
@@ -238,13 +239,22 @@ class PrePublicationGate:
                              product_id=pending_key(origin))
         try:
             fresh = self.ml_reader.read(probe, blocking=True)
+        except MLCommercialUnavailable as error:
+            if error.resolved_url and not same_product(offer['url'], error.resolved_url):
+                self.reject(offer, 'PRODUTO_INCONSISTENTE',
+                            'Gate: recusa comercial pertence a outro produto/variante.', discard=True, retry_after=0)
+            self.reject(offer, 'SEM_ESTOQUE_COMPROVADO',
+                        'Gate: produto Mercado Livre explicitamente indisponível.', discard=True, retry_after=0)
+        except MLProductInconsistent:
+            self.reject(offer, 'PRODUTO_INCONSISTENTE',
+                        'Gate: leitura Mercado Livre diverge do produto/variante esperado.', discard=True, retry_after=0)
         except AffiliateError as exc:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
                 "Gate: não foi possível confirmar o produto/preço atual do Mercado Livre.",
                 retry_after=300, details=type(exc).__name__,
             )
-        if not fresh:
+        if not isinstance(fresh, dict) or not fresh:
             self.reject(
                 offer, "VALIDACAO_INDISPONIVEL",
                 "Gate: leitura atual do Mercado Livre não retornou dados.", retry_after=300,
@@ -256,6 +266,16 @@ class PrePublicationGate:
                     offer, "PRODUTO_INCONSISTENTE",
                     "Gate: Mercado Livre retornou outro produto.", discard=True,
                 )
+            if fresh.get('stock_status') == 'out_of_stock':
+                self.reject(offer, 'SEM_ESTOQUE_COMPROVADO',
+                            'Gate: produto Mercado Livre explicitamente indisponível.', discard=True, retry_after=0)
+            if ((fresh.get('stock_product_id') and fresh['stock_product_id'] != offer['product_id'])
+                    or (fresh.get('stock_resolved_url') and not same_product(offer['url'], fresh['stock_resolved_url']))):
+                self.reject(offer, 'PRODUTO_INCONSISTENTE',
+                            'Gate: prova de estoque pertence a outro produto/variante.', discard=True, retry_after=0)
+            if not confirmed_stock(fresh, offer['url']):
+                self.reject(offer, 'VALIDACAO_INDISPONIVEL',
+                            'Gate: falta prova de disponibilidade do mesmo produto Mercado Livre.', retry_after=300)
         return fresh
 
     def _fresh_kabum(self, offer):
@@ -536,6 +556,8 @@ class PrePublicationGate:
                 # Valida o preço lido antes de mesclar metadados da captura.
                 self._compare_price(original, fresh, strong=True)
                 current = self._copy_price_fields(current, fresh)
+                from mercadolivre_auto import STOCK_FIELDS
+                current.update({key: fresh[key] for key in STOCK_FIELDS if key in fresh})
                 strong = True
         elif store == "KaBuM":
             if (current.get('source') == 'kabum_feed' and current.get('kind') == 'product_offer'

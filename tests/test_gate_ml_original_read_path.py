@@ -15,6 +15,7 @@ from ofertas_core import Ledger
 from fila_ofertas_sqlite import CapturedOfferQueue
 from prepublicacao import PrePublicationGate, GateReject
 from tests.test_prepublicacao import ml_offer
+from tests.publisher_fixtures import structured_stock
 
 SHORT='https://meli.la/fixture'
 
@@ -32,7 +33,7 @@ class OriginalMLReadPathTests(unittest.TestCase):
     def page(self,price='100,00',target=None):
         return dict(name='Atual',price=price,price_condition='',price_from=False,
                     api_image='https://http2.mlstatic.com/read.jpg',
-                    resolved_url=target or self.original['url'],auto_fetched_at=time.time())
+                    resolved_url=target or self.original['url'],auto_fetched_at=time.time(), **structured_stock(target or self.original['url']))
 
     def validate(self,page):
         def fetch(url):

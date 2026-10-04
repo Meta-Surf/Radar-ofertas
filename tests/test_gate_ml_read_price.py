@@ -16,6 +16,7 @@ from ofertas_core import Ledger
 from prepublicacao import GateReject, PrePublicationGate
 from fila_ofertas_sqlite import CapturedOfferQueue
 from tests.test_prepublicacao import ml_offer
+from tests.publisher_fixtures import structured_stock
 
 
 class MLReadPriceTests(unittest.TestCase):
@@ -32,11 +33,11 @@ class MLReadPriceTests(unittest.TestCase):
         self.prepared = dict(self.original, name='Nome herdado',
             api_image='https://http2.mlstatic.com/capture.jpg', auto_fetched_at=time.time())
 
-    def page(self, price='100,00', **kwargs):
+    def page(self, price='100,00', url=None, **kwargs):
         return dict(name='Nome lido', price=price, price_condition='', price_from=False,
-                    resolved_url=self.original['url'],
+                    resolved_url=url or self.original['url'],
                     api_image='https://http2.mlstatic.com/current.jpg',
-                    auto_fetched_at=time.time(), **kwargs)
+                    auto_fetched_at=time.time(), **structured_stock(url or self.original['url']), **kwargs)
 
     def validate_page(self, page):
         with patch('mercadolivre_auto.fetch_http', return_value=page):
@@ -74,7 +75,7 @@ class MLReadPriceTests(unittest.TestCase):
 
     def test_complete_capture_does_not_supply_the_validation_price(self):
         reader = Mock()
-        reader.read.return_value = dict(self.original, price='90,00')
+        reader.read.return_value = dict(self.original, price='90,00', resolved_url=self.original['url'], **structured_stock(self.original['url']))
         self.gate.ml_reader = reader
         result = self.gate.validate(self.original, self.prepared, '@audit')
         self.assertEqual(result['price'], '90,00')
@@ -98,7 +99,7 @@ class MLReadPriceTests(unittest.TestCase):
         reader = Mock()
         reader.read.return_value = dict(product_id=self.original['product_id'],
             resolved_url=self.original['url'], name='Título novo',
-            api_image='https://http2.mlstatic.com/new.jpg', auto_fetched_at=time.time())
+            api_image='https://http2.mlstatic.com/new.jpg', auto_fetched_at=time.time(), **structured_stock(self.original['url']))
         self.gate.ml_reader = reader
         with self.assertRaises(GateReject) as caught:
             self.gate.validate(self.original, self.prepared, '@audit')
@@ -148,7 +149,7 @@ class MLReadPriceTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 1)
 
     def test_native_variant_url_does_not_share_read_cache(self):
-        with patch('mercadolivre_auto.fetch_http', side_effect=[self.page('90,00'), self.page('80,00')]) as fetch:
+        with patch('mercadolivre_auto.fetch_http', side_effect=[self.page('90,00', url=self.original['url']+'?variation=1'), self.page('80,00', url=self.original['url']+'?variation=2')]) as fetch:
             self.original['url'] += '?variation=1'
             self.prepared['url'] = self.original['url']
             first = self.gate.validate(self.original, self.prepared, '@audit')
@@ -195,7 +196,7 @@ class MLPublisherPriceTests(unittest.TestCase):
             stack.callback(reader.close)
             page = dict(name='Produto atual', price='150,00', price_condition='', price_from=False,
                 resolved_url=original['url'], api_image='https://http2.mlstatic.com/fixture.jpg',
-                auto_fetched_at=time.time())
+                auto_fetched_at=time.time(), **structured_stock(original['url']))
             stack.enter_context(patch('mercadolivre_auto.fetch_http', return_value=page))
             reader.read(original, blocking=True)  # Simula job de preparação já concluído.
             stack.enter_context(patch('mercadolivre_auto.AutoReader', return_value=reader))

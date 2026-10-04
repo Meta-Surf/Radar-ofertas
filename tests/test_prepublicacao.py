@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 from inteligencia_ofertas import Intelligence
 from prepublicacao import GateReject, PrePublicationGate
+from tests.publisher_fixtures import structured_stock
 
 
 SHOPEE_LINK = "https://s.shopee.com.br/abc123"
@@ -113,6 +114,7 @@ class GateTests(unittest.TestCase):
         reader = Mock()
         reader.read.return_value = {
             **ml_offer("120,00"),
+            **structured_stock(ml_offer()["url"]),
             "resolved_url": "https://produto.mercadolivre.com.br/MLB-123-_JM",
             "api_image": "https://http2.mlstatic.com/test.jpg",
             "name": "Produto ML",

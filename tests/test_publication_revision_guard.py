@@ -27,6 +27,7 @@ from publisher_backoff import PublisherBackoff, offer_revision
 from revisao_publicacao import catalog_revision, retry_key, selection_id
 from telegram_api import TelegramSendError
 from tests.test_prepublicacao import shopee_offer, ml_offer
+from tests.publisher_fixtures import structured_stock
 from tests.test_radar_publication_selection import feed
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -278,7 +279,7 @@ class PublisherRevisionTests(RevisionFixture):
                 stack.enter_context(patch.object(publisher.MercadoLivreAffiliate,'from_env',return_value=client))
                 reader=Mock()
                 reader.read.side_effect=lambda o,**kw:dict(o,kind='ml_offer',product_id='MercadoLivre:123',
-                    url=ml_offer()['url'],original_url='https://meli.la/fixture',name='Lido',price='100,00',price_from=False)
+                    url=ml_offer()['url'],resolved_url=ml_offer()['url'],original_url='https://meli.la/fixture',name='Lido',price='100,00',price_from=False, **structured_stock(ml_offer()['url']))
                 if reader_hook:reader.read.side_effect=reader_hook
                 stack.enter_context(patch('mercadolivre_auto.AutoReader',return_value=reader))
             else:

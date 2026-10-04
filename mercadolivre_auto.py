@@ -21,6 +21,46 @@ DEFAULT_USER_AGENT = (
 )
 
 
+class MLCommercialUnavailable(AffiliateError):
+    """Evidência comercial negativa do produto identificado, não falha de leitura."""
+    def __init__(self, message, *, resolved_url=None):
+        self.resolved_url = resolved_url
+        super().__init__(message)
+
+
+class MLProductInconsistent(AffiliateError):
+    """A leitura mudou a identidade/variante esperada."""
+
+
+STOCK_FIELDS = ('stock_confirmed', 'stock_status', 'stock_source',
+                'stock_product_id', 'stock_resolved_url')
+SOCIAL_UNAVAILABLE = re.compile(
+    r'\b(?:produto\s+(?:indispon[ií]vel|pausado)|estoque\s+esgotado|sem\s+estoque)\b', re.I)
+
+
+def same_product(expected, actual):
+    left, right = product(expected), product(actual)
+    same = left[0] == right[0] if left and right else bool(identity(expected) and identity(expected) == identity(actual))
+    if not allowed_link(actual) or not same:
+        return False
+    expected_variants = parse_qs(urlsplit(expected).query)
+    actual_variants = parse_qs(urlsplit(actual).query)
+    return all(not expected_variants.get(key) or expected_variants[key] == actual_variants.get(key)
+               for key in ('variation', 'variation_id'))
+
+
+def confirmed_stock(result, expected_url):
+    """Prova explícita estruturada, vinculada ao mesmo item/destino."""
+    if not isinstance(result, dict):
+        return False
+    found = product(str(result.get('resolved_url') or ''))
+    proof_url = str(result.get('stock_resolved_url') or '')
+    return bool(found and result.get('stock_confirmed') is True
+        and result.get('stock_status') == 'in_stock' and result.get('stock_source') == 'structured_product'
+        and result.get('stock_product_id') == found[0]
+        and same_product(expected_url, proof_url) and same_product(proof_url, result['resolved_url']))
+
+
 def reader_cookie():
     value = os.getenv('ML_READER_COOKIE', '').strip()
     if value and '\r' not in value and '\n' not in value and len(value) <= 100000:
@@ -180,25 +220,29 @@ def extract_product(text, url):
     for declared in [p.get('url'), *parsed.canonical]:
         if declared:
             check = urljoin(url, declared)
-            if not allowed_link(check) or not identity(check) or identity(check) != identity(url):
-                raise AffiliateError('Identificação do produto diverge do destino do link.')
+            if not same_product(url, check):
+                raise MLProductInconsistent('Identificação do produto diverge do destino do link.')
     name = p.get('name')
-    if not isinstance(name, str) or not name.strip():
-        raise AffiliateError('Nome do produto ausente na página.')
     offers = p.get('offers')
     offers = offers if isinstance(offers, list) else [offers]
     if len(offers) != 1 or not isinstance(offers[0], dict) or not kind(offers[0], 'Offer'):
         raise AffiliateError('Vários preços, variantes ou faixa de preços: publicação automática aguardando dados inequívocos.')
     offer = offers[0]
+    availability = str(offer.get('availability', '')).rsplit('/', 1)[-1]
+    if availability in {'OutOfStock', 'SoldOut', 'Discontinued'}:
+        raise MLCommercialUnavailable('Produto ML explicitamente indisponível: ' + availability, resolved_url=url)
+    if not isinstance(name, str) or not name.strip():
+        raise AffiliateError('Nome do produto ausente na página.')
     if offer.get('priceCurrency') != 'BRL':
         raise AffiliateError('Preço em reais não identificado.')
-    availability = str(offer.get('availability', '')).rsplit('/', 1)[-1]
     if availability != 'InStock':
         raise AffiliateError('Disponibilidade de compra não confirmada na página.')
     return dict(name=html.unescape(name.strip()), price=amount(offer.get('price')),
                 price_condition='Preço público informado na página; confira as condições de pagamento.',
                 price_from=False, api_image=image_url(p.get('image')), resolved_url=url,
-                auto_fetched_at=time.time())
+                auto_fetched_at=time.time(), stock_confirmed=True, stock_status='in_stock',
+                stock_source='structured_product', stock_product_id=product(url)[0] if product(url) else identity(url),
+                stock_resolved_url=url)
 
 
 
@@ -318,6 +362,8 @@ def fetch_http(url, transport=None):
             raise AffiliateError('Consulta ML indisponível ou tempo de resposta excedido.') from None
         try:
             return extract_product(text, url)
+        except (MLCommercialUnavailable, MLProductInconsistent):
+            raise
         except AffiliateError:
             target = next_destination(text, url)
             if not target:
@@ -493,6 +539,8 @@ def browser_social_featured(page, current):
         target = str(data.get('href') or '').strip()
         if not target or not allowed_link(target) or not identity(target):
             raise AffiliateError('Botão do destaque não aponta para um produto único do Mercado Livre.')
+        if SOCIAL_UNAVAILABLE.search(str(data.get('cardText') or '')):
+            raise MLCommercialUnavailable('Produto ML explicitamente indisponível no card Social.', resolved_url=target)
         title = str(data.get('title') or '').strip()
         if not title:
             raise AffiliateError('Título do produto em destaque não identificado.')
@@ -567,7 +615,31 @@ def browser_image_allowed(url):
         return False
 
 
-def fetch_browser(url):
+def confirm_social_stock(page, card):
+    """Uma navegação ao CTA exato; sem redirects manuais/fallback recursivo."""
+    target = card['resolved_url']
+    response = page.goto(target, wait_until='domcontentloaded', timeout=20000)
+    if response and response.status >= 400:
+        raise AffiliateError('Confirmação de estoque ML indisponível: HTTP ' + str(response.status))
+    current = page.url
+    if social_page(current):
+        raise AffiliateError('Confirmação retornou ao Perfil Social; ciclo recusado.')
+    if not same_product(target, current):
+        raise MLProductInconsistent('Confirmação de estoque devolveu outro produto/variante.')
+    try:
+        page.wait_for_function("!!document.querySelector('script[type=\"application/ld+json\"]')", timeout=5000)
+    except Exception:
+        pass
+    confirmed = extract_product(page.content(), current)
+    if not confirmed_stock(confirmed, target):
+        raise AffiliateError('Disponibilidade do mesmo produto não confirmada.')
+    # A confirmação oficial já leu o preço do mesmo item: não conservar um
+    # preço do card contradito por essa leitura na validação automática.
+    return dict(card, **{key: confirmed[key] for key in (*STOCK_FIELDS,
+                     'price', 'price_condition', 'price_from')})
+
+
+def fetch_browser(url, *, confirm_stock=False):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -634,9 +706,12 @@ def fetch_browser(url):
                     if not allowed_link(current):
                         raise AffiliateError('Navegador saiu do domínio permitido.')
                     if social_page(current):
-                        return browser_social_featured(page, current)
+                        card = browser_social_featured(page, current)
+                        return confirm_social_stock(page, card) if confirm_stock else card
                     try:
                         return extract_product(text, current)
+                    except (MLCommercialUnavailable, MLProductInconsistent):
+                        raise
                     except AffiliateError:
                         target = next_destination(text, current)
                         if not target:
@@ -671,11 +746,32 @@ def enrich(offer):
         raise AffiliateError('Origem ML não autorizada para leitura automática.')
     try:
         found = fetch_http(offer['url'])
+    except MLCommercialUnavailable as error:
+        if automatic and error.resolved_url and not same_product(offer['url'], error.resolved_url):
+            raise MLProductInconsistent('Recusa comercial pertence a outro produto.') from None
+        raise
+    except MLProductInconsistent:
+        raise
     except AffiliateError as http_error:
         try:
-            found = fetch_browser(offer['url'])
+            found = (fetch_browser(offer['url'], confirm_stock=True) if automatic or pending
+                     else fetch_browser(offer['url']))
+        except MLCommercialUnavailable as error:
+            if automatic and error.resolved_url and not same_product(offer['url'], error.resolved_url):
+                raise MLProductInconsistent('Recusa comercial pertence a outro produto.') from None
+            raise
+        except MLProductInconsistent:
+            raise
         except AffiliateError as browser_error:
             raise AffiliateError(str(http_error) + ' ' + str(browser_error)) from None
+    if automatic or pending:
+        if not isinstance(found, dict):
+            raise AffiliateError('Leitura automática retornou formato incompleto.')
+        expected = offer['url'] if automatic else found.get('resolved_url', '')
+        if automatic and not same_product(expected, found.get('resolved_url', '')):
+            raise MLProductInconsistent('Leitura automática devolveu outro produto/variante.')
+        if not confirmed_stock(found, expected):
+            raise AffiliateError('Estoque do produto automático não foi confirmado pela leitura.')
     # Preço escrito na origem continua prevalecendo. Completa somente ausências.
     result = dict(offer, resolved_url=found['resolved_url'], auto_fetched_at=found['auto_fetched_at'])
     if pending:
@@ -690,6 +786,8 @@ def enrich(offer):
         result.update({k: found[k] for k in ('price', 'price_condition', 'price_from')})
     if not result.get('image') and not result.get('api_image'):
         result['api_image'] = found['api_image']
+    if automatic or pending:
+        result.update({key: found[key] for key in STOCK_FIELDS})
     return result
 
 
@@ -760,7 +858,11 @@ class AutoReader:
             return cached
 
         if blocking:
-            value = enrich(dict(offer))
+            try:
+                value = enrich(dict(offer))
+            except MLCommercialUnavailable as error:
+                self.cache[fingerprint] = (time.monotonic(), error)
+                raise
             self.cache[fingerprint] = (time.monotonic(), dict(value))
             return dict(value)
 

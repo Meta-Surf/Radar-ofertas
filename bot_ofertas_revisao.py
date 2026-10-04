@@ -400,6 +400,16 @@ def run_publisher(args, parser):
                                           '| próxima em', state['delay'], 's')
                                     continue
                         except AffiliateError as error:
+                            from mercadolivre_auto import MLCommercialUnavailable, MLProductInconsistent
+                            if isinstance(error, (MLCommercialUnavailable, MLProductInconsistent)):
+                                reason = ('SEM_ESTOQUE_COMPROVADO' if isinstance(error, MLCommercialUnavailable)
+                                          else 'PRODUTO_INCONSISTENTE')
+                                metrics.record_offer(offer, 'REJEITADA', reason, selected=selected)
+                                captured_queue.discard_selected(selected)
+                                row_backoff.clear(source_key)
+                                gate_blocked[source_key] = revision
+                                print('Leitura automática ML recusada:', key, '| motivo:', reason)
+                                continue
                             state = ml_resilience.failure(ml_read_key, error, selected=selected)
                             metrics.record_offer(offer, 'AGUARDANDO', state['reason'], selected=selected)
                             suffix = (
